@@ -1,18 +1,16 @@
-// @flow
-
 export class RequestTimeoutError extends Error {
-  constructor(message:string) {
+  constructor(message) {
     super(message);
     this.name = 'RequestTimeoutError';
   }
+
 }
-
 export class RequestError extends Error {
-  declare code: number;
-
-  constructor(message:string, code:number) {
+  constructor(message, code) {
     super(message);
     this.name = 'RequestError';
     this.code = code;
   }
+
 }
+//# sourceMappingURL=errors.js.map
