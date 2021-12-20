@@ -25,8 +25,8 @@ type Options = {
   wrtc?: Object
 }
 
-type Connection = [number, number, string, string | false];
-type Socket = { socketHash: string, socketId: number, serverId: number, userId: string, sessionId: string | false };
+type Connection = [number, number, string, number, string | false];
+type Socket = { socketHash: string, socketId: number, serverId: number, userId: string, clientId: number, sessionId: string | false };
 
 const getSocketMap = (values?:Array<Connection>):Map<string, Socket> => {
   if (typeof values === 'undefined') {
@@ -34,7 +34,7 @@ const getSocketMap = (values?:Array<Connection>):Map<string, Socket> => {
   }
   return new Map(values.map((x) => {
     const socketHash = `${x[0]}:${x[1]}`;
-    return [socketHash, { socketHash, socketId: x[0], serverId: x[1], userId: x[2], sessionId: x[3] }];
+    return [socketHash, { socketHash, socketId: x[0], serverId: x[1], userId: x[2], clientId: x[3], sessionId: x[4] }];
   }));
 };
 
@@ -47,10 +47,10 @@ const getPeerIds = (values?:Array<Connection>):Set<string> => {
 
 const getSessionMap = (socketMap:Map<string, Socket>):Map<string | false, Map<string, Socket>> => {
   const map = new Map();
-  for(const socket of socketMap.values()) {
+  for (const socket of socketMap.values()) {
     const { socketHash, sessionId } = socket;
     const sessionSocketMap = map.get(sessionId);
-    if(typeof sessionSocketMap === 'undefined') {
+    if (typeof sessionSocketMap === 'undefined') {
       map.set(sessionId, new Map([[socketHash, socket]]));
     } else {
       sessionSocketMap.set(socketHash, socket);
@@ -62,7 +62,9 @@ const getSessionMap = (socketMap:Map<string, Socket>):Map<string | false, Map<st
 export class Bond extends EventEmitter {
   declare roomId: string;
   declare userId: string;
+  declare clientId: number;
   declare name: string;
+  declare publishName: string;
   declare braidClient: BraidClient;
   declare logger: Logger;
   declare ready: Promise<void>;
@@ -70,18 +72,24 @@ export class Bond extends EventEmitter {
   declare sessionMap: Map<string | false, Map<string, Socket>>;
   declare userIds: Set<string>;
   declare wrtc: void | Object;
-  declare peerMap: Map<string, SimplePeer>;
-  declare queueMap: Map<string, PQueue>;
+  declare peerMap: Map<number, SimplePeer>;
+  declare queueMap: Map<string | number, PQueue>;
   declare handleSet: (string, any) => void;
-  declare signalQueueMap: Map<string, Array<[string, Object]>>;
+  declare signalQueueMap: Map<number, Array<[string, Object]>>;
   declare requestCallbackMap: Map<number, (boolean, number, string) => void | Promise<void>>;
+  declare startedSessionId: void | string;
+  declare active: boolean;
+  declare peerDisconnectTimeouts: Map<number, TimeoutID>;
 
   constructor(braidClient: BraidClient, roomId:string, userId:string, options?: Options = {}) {
     super();
+    this.active = true;
+    this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     this.roomId = roomId;
     this.userId = userId;
     const name = `signal/${this.roomId}`;
     this.name = name;
+    this.publishName = `signal/${this.roomId}/${this.clientId.toString(36)}`;
     this.braidClient = braidClient;
     this.ready = this.init();
     this.logger = options.logger || braidClient.logger;
@@ -93,14 +101,16 @@ export class Bond extends EventEmitter {
     this.sessionMap = new Map();
     this.requestCallbackMap = new Map();
     this.signalQueueMap = new Map();
+    this.peerDisconnectTimeouts = new Map();
 
     this.handleSet = (key:string, values:Array<Connection>) => {
       if (key !== name) {
         return;
       }
+      this.active = true;
       const oldSocketMap = this.socketMap;
       const newSocketMap = getSocketMap(values);
-      const oldUserIds = this.userIds
+      const oldUserIds = this.userIds;
       const newUserIds = getPeerIds(values);
       const oldSessionMap = this.sessionMap;
       const newSessionMap = getSessionMap(newSocketMap);
@@ -117,25 +127,25 @@ export class Bond extends EventEmitter {
           this.emit('socketJoin', socketData);
         }
       }
-      for (const peerId of oldUserIds) {
-        if (!newUserIds.has(peerId)) {
-          this.emit('leave', peerId);
+      for (const peerUserId of oldUserIds) {
+        if (!newUserIds.has(peerUserId)) {
+          this.emit('leave', peerUserId);
         }
       }
-      for (const peerId of newUserIds) {
-        if (!oldUserIds.has(peerId)) {
-          this.emit('join', peerId);
+      for (const peerUserId of newUserIds) {
+        if (!oldUserIds.has(peerUserId)) {
+          this.emit('join', peerUserId);
         }
       }
       for (const [sessionId, oldSessionSocketMap] of oldSessionMap) {
         const newSessionSocketMap = newSessionMap.get(sessionId);
-        if(typeof newSessionSocketMap === 'undefined') {
-          for(const socketData of oldSessionSocketMap.values()) {
+        if (typeof newSessionSocketMap === 'undefined') {
+          for (const socketData of oldSessionSocketMap.values()) {
             this.emit('sessionLeave', socketData);
           }
         } else {
-          for(const [socketHash, socketData] of oldSessionSocketMap) {
-            if(!newSessionSocketMap.has(socketHash)) {
+          for (const [socketHash, socketData] of oldSessionSocketMap) {
+            if (!newSessionSocketMap.has(socketHash)) {
               this.emit('sessionLeave', socketData);
             }
           }
@@ -143,13 +153,13 @@ export class Bond extends EventEmitter {
       }
       for (const [sessionId, newSessionSocketMap] of newSessionMap) {
         const oldSessionSocketMap = oldSessionMap.get(sessionId);
-        if(typeof oldSessionSocketMap === 'undefined') {
-          for(const socketData of newSessionSocketMap.values()) {
+        if (typeof oldSessionSocketMap === 'undefined') {
+          for (const socketData of newSessionSocketMap.values()) {
             this.emit('sessionJoin', socketData);
           }
         } else {
-          for(const [socketHash, socketData] of newSessionSocketMap) {
-            if(!oldSessionSocketMap.has(socketHash)) {
+          for (const [socketHash, socketData] of newSessionSocketMap) {
+            if (!oldSessionSocketMap.has(socketHash)) {
               this.emit('sessionJoin', socketData);
             }
           }
@@ -157,11 +167,73 @@ export class Bond extends EventEmitter {
       }
     };
     this.braidClient.data.addListener('set', this.handleSet);
-    this.on('socketJoin', (socketData:Socket) => {
-      this.addToQueue(socketData.socketHash, () => this.connectToPeer(socketData));
+    this.addListener('socketJoin', (socketData:Socket) => {
+      const { clientId } = socketData;
+      if (this.peerDisconnectTimeouts.has(clientId)) {
+        this.logger.info(`Clearing client ${clientId} disconnect timeout after socket join`);
+        clearTimeout(this.peerDisconnectTimeouts.get(clientId));
+        this.peerDisconnectTimeouts.delete(clientId);
+      }
+      this.addToQueue(clientId, () => this.connectToPeer(socketData));
     });
-    this.on('socketLeave', (socketData:Socket) => {
-      this.addToQueue(socketData.socketHash, () => this.disconnectFromPeer(socketData));
+    this.addListener('socketLeave', (socketData:Socket) => {
+      const { clientId } = socketData;
+      clearTimeout(this.peerDisconnectTimeouts.get(clientId));
+      if (this.active) {
+        this.peerDisconnectTimeouts.set(clientId, setTimeout(() => {
+          this.peerDisconnectTimeouts.delete(clientId);
+          this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
+        }, 15000));
+      } else {
+        this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
+      }
+    });
+    this.braidClient.addListener('close', () => {
+      const oldSocketData = [...this.socketMap.values()];
+      const oldUserIds = [...this.userIds];
+      this.socketMap.clear();
+      this.userIds.clear();
+      for (const socketData of oldSocketData) {
+        this.emit('socketLeave', socketData);
+      }
+      for (const oldUserId of oldUserIds) {
+        this.emit('leave', oldUserId);
+      }
+    });
+    this.braidClient.addListener('reconnect', (isReconnecting: boolean) => {
+      if (!isReconnecting) {
+        return;
+      }
+      const startedSessionId = this.startedSessionId;
+      const handleInitialized = () => {
+        if (typeof startedSessionId === 'string') {
+          this.logger.info(`Restarting session ${startedSessionId}`);
+          this.startSession(startedSessionId).catch((error) => {
+            this.logger.error(`Unable to restart session ${startedSessionId} after reconnect`);
+            this.logger.errorStack(error);
+          });
+        }
+        this.braidClient.removeListener('initialized', handleInitialized);
+        this.braidClient.removeListener('close', handleClose);
+        this.braidClient.removeListener('error', handleError);
+      };
+      const handleClose = () => {
+        this.braidClient.removeListener('initialized', handleInitialized);
+        this.braidClient.removeListener('close', handleClose);
+        this.braidClient.removeListener('error', handleError);
+      };
+      const handleError = (error:Error) => {
+        if (typeof startedSessionId === 'string') {
+          this.logger.error(`Unable to restart session ${startedSessionId} after reconnect`);
+          this.logger.errorStack(error);
+        }
+        this.braidClient.removeListener('initialized', handleInitialized);
+        this.braidClient.removeListener('close', handleClose);
+        this.braidClient.removeListener('error', handleError);
+      };
+      this.braidClient.addListener('initialized', handleInitialized);
+      this.braidClient.addListener('close', handleClose);
+      this.braidClient.addListener('error', handleError);
     });
   }
 
@@ -202,14 +274,14 @@ export class Bond extends EventEmitter {
         this.braidClient.addServerEventListener(this.name, this.handleMessage.bind(this)),
       ]);
       await promise;
-      await this.braidClient.startPublishing(this.name);
+      await this.braidClient.startPublishing(this.publishName);
     } catch (error) {
       this.braidClient.logger.error(`Unable to join ${this.roomId}`);
       throw error;
     }
   }
 
-  addToQueue(queueId:string, func:() => Promise<void>) {
+  addToQueue(queueId:string | number, func:() => Promise<void>) {
     const queue = this.queueMap.get(queueId);
     if (typeof queue !== 'undefined') {
       return queue.add(func);
@@ -241,19 +313,47 @@ export class Bond extends EventEmitter {
         reject(new RequestError(text, code));
       };
       this.requestCallbackMap.set(requestId, handleResponse);
-      this.braidClient.publish(this.name, { requestId, type, value });
+      this.braidClient.publish(this.publishName, { requestId, type, value });
     });
   }
 
-  async connectToPeer({ userId, serverId, socketId, socketHash }:Socket) {
-    const peer = new SimplePeer({ initiator: userId > this.userId, wrtc: this.wrtc });
-    this.peerMap.set(socketHash, peer);
+  async connectToPeer({ userId, serverId, socketId, clientId, socketHash }:Socket) {
+    const existingPeer = this.peerMap.get(clientId);
+    const peer = existingPeer || new SimplePeer({ initiator: userId > this.userId, wrtc: this.wrtc });
+    this.peerMap.set(clientId, peer);
+    if (peer.connected) {
+      peer.emit('peerReconnect');
+      const handlePeerClose = () => {
+        this.logger.info(`Peer ${socketHash} disconnected`);
+        peer.removeListener('error', handlePeerError);
+        peer.removeListener('close', handlePeerClose);
+        peer.removeListener('peerReconnect', handlePeerReconnect);
+        this.emit('disconnect', { userId, serverId, socketId, peer });
+      };
+      const handlePeerError = (error:Error) => {
+        this.logger.error(`Peer ${socketHash} error`);
+        this.logger.errorStack(error);
+        this.emit('peerError', { error, userId, serverId, socketId, peer });
+      };
+      const handlePeerReconnect = () => {
+        this.logger.info(`Peer ${socketHash} reconnected`);
+        peer.removeListener('error', handlePeerError);
+        peer.removeListener('close', handlePeerClose);
+        peer.removeListener('peerReconnect', handlePeerReconnect);
+      };
+      peer.addListener('close', handlePeerClose);
+      peer.addListener('error', handlePeerError);
+      peer.addListener('peerReconnect', handlePeerReconnect);
+      this.emit('connect', { userId, clientId, serverId, socketId, peer });
+      return;
+    }
     await new Promise((resolve) => {
       const timeout = setTimeout(() => {
         peer.removeListener('error', handleError);
         peer.removeListener('connect', handleConnect);
         peer.removeListener('signal', handleSignal);
         this.removeListener('close', handleClose);
+        this.removeListener('socketLeave', handleSocketLeave);
         resolve();
       }, 5000);
       const handleConnect = () => {
@@ -262,10 +362,12 @@ export class Bond extends EventEmitter {
         peer.removeListener('connect', handleConnect);
         peer.removeListener('signal', handleSignal);
         this.removeListener('close', handleClose);
+        this.removeListener('socketLeave', handleSocketLeave);
         const handlePeerClose = () => {
           this.logger.info(`Peer ${socketHash} disconnected`);
           peer.removeListener('error', handlePeerError);
           peer.removeListener('close', handlePeerClose);
+          peer.removeListener('peerReconnect', handlePeerReconnect);
           this.emit('disconnect', { userId, serverId, socketId, peer });
         };
         const handlePeerError = (error:Error) => {
@@ -273,9 +375,16 @@ export class Bond extends EventEmitter {
           this.logger.errorStack(error);
           this.emit('peerError', { error, userId, serverId, socketId, peer });
         };
+        const handlePeerReconnect = () => {
+          this.logger.info(`Peer ${socketHash} reconnected`);
+          peer.removeListener('error', handlePeerError);
+          peer.removeListener('close', handlePeerClose);
+          peer.removeListener('peerReconnect', handlePeerReconnect);
+        };
         peer.addListener('close', handlePeerClose);
         peer.addListener('error', handlePeerError);
-        this.emit('connect', { userId, serverId, socketId, peer });
+        peer.addListener('peerReconnect', handlePeerReconnect);
+        this.emit('connect', { userId, clientId, serverId, socketId, peer });
         resolve();
       };
       const handleSignal = async (data:Object) => {
@@ -292,6 +401,7 @@ export class Bond extends EventEmitter {
         peer.removeListener('connect', handleConnect);
         peer.removeListener('signal', handleSignal);
         this.removeListener('close', handleClose);
+        this.removeListener('socketLeave', handleSocketLeave);
         resolve();
       };
       const handleError = (error:Error) => {
@@ -300,16 +410,31 @@ export class Bond extends EventEmitter {
         peer.removeListener('connect', handleConnect);
         peer.removeListener('signal', handleSignal);
         this.removeListener('close', handleClose);
+        this.removeListener('socketLeave', handleSocketLeave);
         this.logger.error(`Error connecting to ${userId}`);
         this.logger.errorStack(error);
         this.emit('error', error);
+        resolve();
+      };
+      const handleSocketLeave = ({ socketHash: oldSocketHash }:Socket) => {
+        if (socketHash !== oldSocketHash) {
+          return;
+        }
+        clearTimeout(timeout);
+        peer.removeListener('error', handleError);
+        peer.removeListener('connect', handleConnect);
+        peer.removeListener('signal', handleSignal);
+        this.removeListener('close', handleClose);
+        this.removeListener('socketLeave', handleSocketLeave);
+        this.logger.warn(`Unable to connect to ${userId}, socket closed before connection was completed`);
         resolve();
       };
       peer.addListener('error', handleError);
       peer.addListener('connect', handleConnect);
       peer.addListener('signal', handleSignal);
       this.addListener('close', handleClose);
-      const signalQueue = this.signalQueueMap.get(socketHash);
+      this.addListener('socketLeave', handleSocketLeave);
+      const signalQueue = this.signalQueueMap.get(clientId);
       if (Array.isArray(signalQueue)) {
         while (signalQueue.length > 0) {
           const data = signalQueue.shift();
@@ -319,13 +444,13 @@ export class Bond extends EventEmitter {
     });
   }
 
-  async disconnectFromPeer({ socketHash }:Socket) {
-    const peer = this.peerMap.get(socketHash);
+  async disconnectFromPeer({ clientId }:Socket) {
+    const peer = this.peerMap.get(clientId);
     if (typeof peer === 'undefined') {
       return;
     }
     peer.destroy();
-    this.peerMap.delete(socketHash);
+    this.peerMap.delete(clientId);
   }
 
   async onIdle() {
@@ -338,12 +463,14 @@ export class Bond extends EventEmitter {
     }
   }
 
-  startSession(sessionId:string, password?:string) {
-    return this.publish(START_SESSION, { sessionId, password });
+  async startSession(sessionId:string) {
+    await this.publish(START_SESSION, { sessionId });
+    this.startedSessionId = sessionId;
   }
 
-  leaveSession() {
-    return this.publish(LEAVE_SESSION, {});
+  async leaveSession() {
+    await this.publish(LEAVE_SESSION, {});
+    delete this.startedSessionId;
   }
 
   handleMessage(message:{ requestId?: number, type:string, value:Object }) {
@@ -395,6 +522,7 @@ export class Bond extends EventEmitter {
       case SIGNAL:
         try {
           const {
+            clientId,
             serverId,
             socketId,
             data,
@@ -414,15 +542,17 @@ export class Bond extends EventEmitter {
             this.logger.error(JSON.stringify(message));
             return;
           }
-          const socketHash = `${socketId}:${serverId}`;
-          const peer = this.peerMap.get(socketHash);
+          const peer = this.peerMap.get(clientId);
           if (typeof peer === 'undefined') {
-            const signalQueue = this.signalQueueMap.get(socketHash);
+            const signalQueue = this.signalQueueMap.get(clientId);
             if (Array.isArray(signalQueue)) {
               signalQueue.push(data);
               return;
             }
-            this.signalQueueMap.set(socketHash, [data]);
+            this.signalQueueMap.set(clientId, [data]);
+            return;
+          }
+          if (peer.destroyed || peer.destroying) {
             return;
           }
           peer.signal(data);
@@ -437,16 +567,20 @@ export class Bond extends EventEmitter {
   }
 
   close() {
-    const oldSocketMap = [...this.socketMap.keys()];
+    this.active = false;
+    const oldSocketData = [...this.socketMap.values()];
     const oldUserIds = [...this.userIds];
     this.braidClient.data.removeListener('set', this.handleSet);
-    this.braidClient.stopPublishing(this.name);
+    this.braidClient.stopPublishing(this.publishName);
     this.braidClient.unsubscribe(this.name);
     this.braidClient.removeServerEventListener(this.name);
     this.socketMap.clear();
     this.userIds.clear();
-    for (const socketHash of oldSocketMap) {
-      this.emit('socketLeave', socketHash);
+    for (const timeout of this.peerDisconnectTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    for (const socketData of oldSocketData) {
+      this.emit('socketLeave', socketData);
     }
     for (const userId of oldUserIds) {
       this.emit('leave', userId);
