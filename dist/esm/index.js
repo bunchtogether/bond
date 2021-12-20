@@ -3,6 +3,52 @@ import SimplePeer from 'simple-peer';
 import PQueue from 'p-queue';
 import { SIGNAL, START_SESSION, LEAVE_SESSION, RESPONSE } from './constants';
 import { RequestError, RequestTimeoutError } from './errors';
+
+const getSocketMap = values => {
+  if (typeof values === 'undefined') {
+    return new Map();
+  }
+
+  return new Map(values.map(x => {
+    const socketHash = `${x[0]}:${x[1]}`;
+    return [socketHash, {
+      socketHash,
+      socketId: x[0],
+      serverId: x[1],
+      userId: x[2],
+      sessionId: x[3]
+    }];
+  }));
+};
+
+const getPeerIds = values => {
+  if (typeof values === 'undefined') {
+    return new Set();
+  }
+
+  return new Set(values.map(x => x[2]));
+};
+
+const getSessionMap = socketMap => {
+  const map = new Map();
+
+  for (const socket of socketMap.values()) {
+    const {
+      socketHash,
+      sessionId
+    } = socket;
+    const sessionSocketMap = map.get(sessionId);
+
+    if (typeof sessionSocketMap === 'undefined') {
+      map.set(sessionId, new Map([[socketHash, socket]]));
+    } else {
+      sessionSocketMap.set(socketHash, socket);
+    }
+  }
+
+  return map;
+};
+
 export class Bond extends EventEmitter {
   constructor(braidClient, roomId, userId, options = {}) {
     super();
@@ -14,10 +60,11 @@ export class Bond extends EventEmitter {
     this.ready = this.init();
     this.logger = options.logger || braidClient.logger;
     this.wrtc = options.wrtc;
-    this.socketHashSet = new Set();
+    this.socketMap = new Map();
     this.userIds = new Set();
     this.peerMap = new Map();
     this.queueMap = new Map();
+    this.sessionMap = new Map();
     this.requestCallbackMap = new Map();
     this.signalQueueMap = new Map();
 
@@ -26,60 +73,79 @@ export class Bond extends EventEmitter {
         return;
       }
 
+      const oldSocketMap = this.socketMap;
+      const newSocketMap = getSocketMap(values);
       const oldUserIds = this.userIds;
-      this.userIds = new Set();
-      const newSocketHashes = [];
-      const oldSocketHashes = [];
+      const newUserIds = getPeerIds(values);
+      const oldSessionMap = this.sessionMap;
+      const newSessionMap = getSessionMap(newSocketMap);
+      this.userIds = newUserIds;
+      this.socketMap = newSocketMap;
+      this.sessionMap = newSessionMap;
 
-      for (const socketHash of this.socketHashSet) {
-        if (!values.includes(socketHash)) {
-          oldSocketHashes.push(socketHash);
-          this.socketHashSet.delete(socketHash);
+      for (const [socketHash, socketData] of oldSocketMap) {
+        if (!newSocketMap.has(socketHash)) {
+          this.emit('socketLeave', socketData);
         }
       }
 
-      for (const socketHash of values) {
-        const [peerId] = socketHash.split(':');
-
-        if (peerId === userId) {
-          continue;
+      for (const [socketHash, socketData] of newSocketMap) {
+        if (!oldSocketMap.has(socketHash)) {
+          this.emit('socketJoin', socketData);
         }
-
-        this.userIds.add(peerId);
-
-        if (!this.socketHashSet.has(socketHash)) {
-          newSocketHashes.push(socketHash);
-          this.socketHashSet.add(socketHash);
-        }
-      }
-
-      for (const socketHash of oldSocketHashes) {
-        this.emit('socketLeave', socketHash);
-      }
-
-      for (const socketHash of newSocketHashes) {
-        this.emit('socketJoin', socketHash);
       }
 
       for (const peerId of oldUserIds) {
-        if (!this.userIds.has(peerId)) {
+        if (!newUserIds.has(peerId)) {
           this.emit('leave', peerId);
         }
       }
 
-      for (const peerId of this.userIds) {
+      for (const peerId of newUserIds) {
         if (!oldUserIds.has(peerId)) {
           this.emit('join', peerId);
+        }
+      }
+
+      for (const [sessionId, oldSessionSocketMap] of oldSessionMap) {
+        const newSessionSocketMap = newSessionMap.get(sessionId);
+
+        if (typeof newSessionSocketMap === 'undefined') {
+          for (const socketData of oldSessionSocketMap.values()) {
+            this.emit('sessionLeave', socketData);
+          }
+        } else {
+          for (const [socketHash, socketData] of oldSessionSocketMap) {
+            if (!newSessionSocketMap.has(socketHash)) {
+              this.emit('sessionLeave', socketData);
+            }
+          }
+        }
+      }
+
+      for (const [sessionId, newSessionSocketMap] of newSessionMap) {
+        const oldSessionSocketMap = oldSessionMap.get(sessionId);
+
+        if (typeof oldSessionSocketMap === 'undefined') {
+          for (const socketData of newSessionSocketMap.values()) {
+            this.emit('sessionJoin', socketData);
+          }
+        } else {
+          for (const [socketHash, socketData] of newSessionSocketMap) {
+            if (!oldSessionSocketMap.has(socketHash)) {
+              this.emit('sessionJoin', socketData);
+            }
+          }
         }
       }
     };
 
     this.braidClient.data.addListener('set', this.handleSet);
-    this.on('socketJoin', socketHash => {
-      this.addToQueue(socketHash, () => this.connectToPeer(socketHash));
+    this.on('socketJoin', socketData => {
+      this.addToQueue(socketData.socketHash, () => this.connectToPeer(socketData));
     });
-    this.on('socketLeave', socketHash => {
-      this.addToQueue(socketHash, () => this.disconnectFromPeer(socketHash));
+    this.on('socketLeave', socketData => {
+      this.addToQueue(socketData.socketHash, () => this.disconnectFromPeer(socketData));
     });
   }
 
@@ -122,8 +188,8 @@ export class Bond extends EventEmitter {
 
     try {
       await Promise.all([this.braidClient.subscribe(this.name), this.braidClient.addServerEventListener(this.name, this.handleMessage.bind(this))]);
-      await this.braidClient.startPublishing(this.name);
       await promise;
+      await this.braidClient.startPublishing(this.name);
     } catch (error) {
       this.braidClient.logger.error(`Unable to join ${this.roomId}`);
       throw error;
@@ -181,12 +247,14 @@ export class Bond extends EventEmitter {
     });
   }
 
-  async connectToPeer(socketHash) {
-    const [peerId, serverIdString, socketIdString] = socketHash.split(':');
-    const serverId = parseInt(serverIdString, 10);
-    const socketId = parseInt(socketIdString, 10);
+  async connectToPeer({
+    userId,
+    serverId,
+    socketId,
+    socketHash
+  }) {
     const peer = new SimplePeer({
-      initiator: peerId > this.userId,
+      initiator: userId > this.userId,
       wrtc: this.wrtc
     });
     this.peerMap.set(socketHash, peer);
@@ -211,7 +279,7 @@ export class Bond extends EventEmitter {
           peer.removeListener('error', handlePeerError);
           peer.removeListener('close', handlePeerClose);
           this.emit('disconnect', {
-            peerId,
+            userId,
             serverId,
             socketId,
             peer
@@ -223,7 +291,7 @@ export class Bond extends EventEmitter {
           this.logger.errorStack(error);
           this.emit('peerError', {
             error,
-            peerId,
+            userId,
             serverId,
             socketId,
             peer
@@ -233,7 +301,7 @@ export class Bond extends EventEmitter {
         peer.addListener('close', handlePeerClose);
         peer.addListener('error', handlePeerError);
         this.emit('connect', {
-          peerId,
+          userId,
           serverId,
           socketId,
           peer
@@ -244,7 +312,6 @@ export class Bond extends EventEmitter {
       const handleSignal = async data => {
         try {
           await this.publish(SIGNAL, {
-            peerId,
             serverId,
             socketId,
             data
@@ -270,7 +337,7 @@ export class Bond extends EventEmitter {
         peer.removeListener('connect', handleConnect);
         peer.removeListener('signal', handleSignal);
         this.removeListener('close', handleClose);
-        this.logger.error(`Error connecting to ${peerId}`);
+        this.logger.error(`Error connecting to ${userId}`);
         this.logger.errorStack(error);
         this.emit('error', error);
         resolve();
@@ -291,7 +358,9 @@ export class Bond extends EventEmitter {
     });
   }
 
-  async disconnectFromPeer(socketHash) {
+  async disconnectFromPeer({
+    socketHash
+  }) {
     const peer = this.peerMap.get(socketHash);
 
     if (typeof peer === 'undefined') {
@@ -392,17 +461,10 @@ export class Bond extends EventEmitter {
       case SIGNAL:
         try {
           const {
-            peerId,
             serverId,
             socketId,
             data
           } = value;
-
-          if (typeof peerId !== 'string') {
-            this.logger.error('Signal message contained an invalid peer ID');
-            this.logger.error(JSON.stringify(message));
-            return;
-          }
 
           if (typeof serverId !== 'number') {
             this.logger.error('Signal message contained an invalid server ID');
@@ -422,7 +484,7 @@ export class Bond extends EventEmitter {
             return;
           }
 
-          const socketHash = `${peerId}:${serverId}:${socketId}`;
+          const socketHash = `${socketId}:${serverId}`;
           const peer = this.peerMap.get(socketHash);
 
           if (typeof peer === 'undefined') {
@@ -451,16 +513,16 @@ export class Bond extends EventEmitter {
   }
 
   close() {
-    const oldSocketHashes = [...this.socketHashSet];
+    const oldSocketMap = [...this.socketMap.keys()];
     const oldUserIds = [...this.userIds];
     this.braidClient.data.removeListener('set', this.handleSet);
     this.braidClient.stopPublishing(this.name);
     this.braidClient.unsubscribe(this.name);
     this.braidClient.removeServerEventListener(this.name);
-    this.socketHashSet.clear();
+    this.socketMap.clear();
     this.userIds.clear();
 
-    for (const socketHash of oldSocketHashes) {
+    for (const socketHash of oldSocketMap) {
       this.emit('socketLeave', socketHash);
     }
 

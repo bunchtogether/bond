@@ -39,12 +39,6 @@ function _iterableToArrayLimit(arr, i) { var _i = arr == null ? null : typeof Sy
 
 function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
 
-function _createForOfIteratorHelper(o, allowArrayLike) { var it = typeof Symbol !== "undefined" && o[Symbol.iterator] || o["@@iterator"]; if (!it) { if (Array.isArray(o) || (it = _unsupportedIterableToArray(o)) || allowArrayLike && o && typeof o.length === "number") { if (it) o = it; var i = 0; var F = function F() {}; return { s: F, n: function n() { if (i >= o.length) return { done: true }; return { done: false, value: o[i++] }; }, e: function e(_e2) { throw _e2; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var normalCompletion = true, didErr = false, err; return { s: function s() { it = it.call(o); }, n: function n() { var step = it.next(); normalCompletion = step.done; return step; }, e: function e(_e3) { didErr = true; err = _e3; }, f: function f() { try { if (!normalCompletion && it.return != null) it.return(); } finally { if (didErr) throw err; } } }; }
-
-function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
-
-function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
-
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
@@ -64,6 +58,67 @@ function _assertThisInitialized(self) { if (self === void 0) { throw new Referen
 function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); return true; } catch (e) { return false; } }
 
 function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
+
+function _createForOfIteratorHelper(o, allowArrayLike) { var it = typeof Symbol !== "undefined" && o[Symbol.iterator] || o["@@iterator"]; if (!it) { if (Array.isArray(o) || (it = _unsupportedIterableToArray(o)) || allowArrayLike && o && typeof o.length === "number") { if (it) o = it; var i = 0; var F = function F() {}; return { s: F, n: function n() { if (i >= o.length) return { done: true }; return { done: false, value: o[i++] }; }, e: function e(_e2) { throw _e2; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var normalCompletion = true, didErr = false, err; return { s: function s() { it = it.call(o); }, n: function n() { var step = it.next(); normalCompletion = step.done; return step; }, e: function e(_e3) { didErr = true; err = _e3; }, f: function f() { try { if (!normalCompletion && it.return != null) it.return(); } finally { if (didErr) throw err; } } }; }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+var getSocketMap = function getSocketMap(values) {
+  if (typeof values === 'undefined') {
+    return new Map();
+  }
+
+  return new Map(values.map(function (x) {
+    var socketHash = "".concat(x[0], ":").concat(x[1]);
+    return [socketHash, {
+      socketHash: socketHash,
+      socketId: x[0],
+      serverId: x[1],
+      userId: x[2],
+      sessionId: x[3]
+    }];
+  }));
+};
+
+var getPeerIds = function getPeerIds(values) {
+  if (typeof values === 'undefined') {
+    return new Set();
+  }
+
+  return new Set(values.map(function (x) {
+    return x[2];
+  }));
+};
+
+var getSessionMap = function getSessionMap(socketMap) {
+  var map = new Map();
+
+  var _iterator = _createForOfIteratorHelper(socketMap.values()),
+      _step;
+
+  try {
+    for (_iterator.s(); !(_step = _iterator.n()).done;) {
+      var socket = _step.value;
+      var socketHash = socket.socketHash,
+          sessionId = socket.sessionId;
+      var sessionSocketMap = map.get(sessionId);
+
+      if (typeof sessionSocketMap === 'undefined') {
+        map.set(sessionId, new Map([[socketHash, socket]]));
+      } else {
+        sessionSocketMap.set(socketHash, socket);
+      }
+    }
+  } catch (err) {
+    _iterator.e(err);
+  } finally {
+    _iterator.f();
+  }
+
+  return map;
+};
 
 var Bond = /*#__PURE__*/function (_EventEmitter) {
   _inherits(Bond, _EventEmitter);
@@ -86,10 +141,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     _this.ready = _this.init();
     _this.logger = options.logger || braidClient.logger;
     _this.wrtc = options.wrtc;
-    _this.socketHashSet = new Set();
+    _this.socketMap = new Map();
     _this.userIds = new Set();
     _this.peerMap = new Map();
     _this.queueMap = new Map();
+    _this.sessionMap = new Map();
     _this.requestCallbackMap = new Map();
     _this.signalQueueMap = new Map();
 
@@ -98,51 +154,27 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         return;
       }
 
+      var oldSocketMap = _this.socketMap;
+      var newSocketMap = getSocketMap(values);
       var oldUserIds = _this.userIds;
-      _this.userIds = new Set();
-      var newSocketHashes = [];
-      var oldSocketHashes = [];
+      var newUserIds = getPeerIds(values);
+      var oldSessionMap = _this.sessionMap;
+      var newSessionMap = getSessionMap(newSocketMap);
+      _this.userIds = newUserIds;
+      _this.socketMap = newSocketMap;
+      _this.sessionMap = newSessionMap;
 
-      var _iterator = _createForOfIteratorHelper(_this.socketHashSet),
-          _step;
-
-      try {
-        for (_iterator.s(); !(_step = _iterator.n()).done;) {
-          var _socketHash2 = _step.value;
-
-          if (!values.includes(_socketHash2)) {
-            oldSocketHashes.push(_socketHash2);
-
-            _this.socketHashSet.delete(_socketHash2);
-          }
-        }
-      } catch (err) {
-        _iterator.e(err);
-      } finally {
-        _iterator.f();
-      }
-
-      var _iterator2 = _createForOfIteratorHelper(values),
+      var _iterator2 = _createForOfIteratorHelper(oldSocketMap),
           _step2;
 
       try {
         for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
-          var _socketHash3 = _step2.value;
+          var _step2$value = _slicedToArray(_step2.value, 2),
+              socketHash = _step2$value[0],
+              socketData = _step2$value[1];
 
-          var _socketHash3$split = _socketHash3.split(':'),
-              _socketHash3$split2 = _slicedToArray(_socketHash3$split, 1),
-              peerId = _socketHash3$split2[0];
-
-          if (peerId === userId) {
-            continue;
-          }
-
-          _this.userIds.add(peerId);
-
-          if (!_this.socketHashSet.has(_socketHash3)) {
-            newSocketHashes.push(_socketHash3);
-
-            _this.socketHashSet.add(_socketHash3);
+          if (!newSocketMap.has(socketHash)) {
+            _this.emit('socketLeave', socketData);
           }
         }
       } catch (err) {
@@ -151,27 +183,17 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         _iterator2.f();
       }
 
-      for (var _i = 0, _oldSocketHashes = oldSocketHashes; _i < _oldSocketHashes.length; _i++) {
-        var socketHash = _oldSocketHashes[_i];
-
-        _this.emit('socketLeave', socketHash);
-      }
-
-      for (var _i2 = 0, _newSocketHashes = newSocketHashes; _i2 < _newSocketHashes.length; _i2++) {
-        var _socketHash = _newSocketHashes[_i2];
-
-        _this.emit('socketJoin', _socketHash);
-      }
-
-      var _iterator3 = _createForOfIteratorHelper(oldUserIds),
+      var _iterator3 = _createForOfIteratorHelper(newSocketMap),
           _step3;
 
       try {
         for (_iterator3.s(); !(_step3 = _iterator3.n()).done;) {
-          var _peerId = _step3.value;
+          var _step3$value = _slicedToArray(_step3.value, 2),
+              _socketHash = _step3$value[0],
+              _socketData = _step3$value[1];
 
-          if (!_this.userIds.has(_peerId)) {
-            _this.emit('leave', _peerId);
+          if (!oldSocketMap.has(_socketHash)) {
+            _this.emit('socketJoin', _socketData);
           }
         }
       } catch (err) {
@@ -180,15 +202,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         _iterator3.f();
       }
 
-      var _iterator4 = _createForOfIteratorHelper(_this.userIds),
+      var _iterator4 = _createForOfIteratorHelper(oldUserIds),
           _step4;
 
       try {
         for (_iterator4.s(); !(_step4 = _iterator4.n()).done;) {
-          var _peerId2 = _step4.value;
+          var peerId = _step4.value;
 
-          if (!oldUserIds.has(_peerId2)) {
-            _this.emit('join', _peerId2);
+          if (!newUserIds.has(peerId)) {
+            _this.emit('leave', peerId);
           }
         }
       } catch (err) {
@@ -196,19 +218,142 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       } finally {
         _iterator4.f();
       }
+
+      var _iterator5 = _createForOfIteratorHelper(newUserIds),
+          _step5;
+
+      try {
+        for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
+          var _peerId = _step5.value;
+
+          if (!oldUserIds.has(_peerId)) {
+            _this.emit('join', _peerId);
+          }
+        }
+      } catch (err) {
+        _iterator5.e(err);
+      } finally {
+        _iterator5.f();
+      }
+
+      var _iterator6 = _createForOfIteratorHelper(oldSessionMap),
+          _step6;
+
+      try {
+        for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
+          var _step6$value = _slicedToArray(_step6.value, 2),
+              sessionId = _step6$value[0],
+              oldSessionSocketMap = _step6$value[1];
+
+          var newSessionSocketMap = newSessionMap.get(sessionId);
+
+          if (typeof newSessionSocketMap === 'undefined') {
+            var _iterator8 = _createForOfIteratorHelper(oldSessionSocketMap.values()),
+                _step8;
+
+            try {
+              for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
+                var _socketData2 = _step8.value;
+
+                _this.emit('sessionLeave', _socketData2);
+              }
+            } catch (err) {
+              _iterator8.e(err);
+            } finally {
+              _iterator8.f();
+            }
+          } else {
+            var _iterator9 = _createForOfIteratorHelper(oldSessionSocketMap),
+                _step9;
+
+            try {
+              for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
+                var _step9$value = _slicedToArray(_step9.value, 2),
+                    _socketHash2 = _step9$value[0],
+                    _socketData3 = _step9$value[1];
+
+                if (!newSessionSocketMap.has(_socketHash2)) {
+                  _this.emit('sessionLeave', _socketData3);
+                }
+              }
+            } catch (err) {
+              _iterator9.e(err);
+            } finally {
+              _iterator9.f();
+            }
+          }
+        }
+      } catch (err) {
+        _iterator6.e(err);
+      } finally {
+        _iterator6.f();
+      }
+
+      var _iterator7 = _createForOfIteratorHelper(newSessionMap),
+          _step7;
+
+      try {
+        for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
+          var _step7$value = _slicedToArray(_step7.value, 2),
+              _sessionId = _step7$value[0],
+              _newSessionSocketMap = _step7$value[1];
+
+          var _oldSessionSocketMap = oldSessionMap.get(_sessionId);
+
+          if (typeof _oldSessionSocketMap === 'undefined') {
+            var _iterator10 = _createForOfIteratorHelper(_newSessionSocketMap.values()),
+                _step10;
+
+            try {
+              for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
+                var _socketData4 = _step10.value;
+
+                _this.emit('sessionJoin', _socketData4);
+              }
+            } catch (err) {
+              _iterator10.e(err);
+            } finally {
+              _iterator10.f();
+            }
+          } else {
+            var _iterator11 = _createForOfIteratorHelper(_newSessionSocketMap),
+                _step11;
+
+            try {
+              for (_iterator11.s(); !(_step11 = _iterator11.n()).done;) {
+                var _step11$value = _slicedToArray(_step11.value, 2),
+                    _socketHash3 = _step11$value[0],
+                    _socketData5 = _step11$value[1];
+
+                if (!_oldSessionSocketMap.has(_socketHash3)) {
+                  _this.emit('sessionJoin', _socketData5);
+                }
+              }
+            } catch (err) {
+              _iterator11.e(err);
+            } finally {
+              _iterator11.f();
+            }
+          }
+        }
+      } catch (err) {
+        _iterator7.e(err);
+      } finally {
+        _iterator7.f();
+      }
     };
 
     _this.braidClient.data.addListener('set', _this.handleSet);
 
-    _this.on('socketJoin', function (socketHash) {
-      _this.addToQueue(socketHash, function () {
-        return _this.connectToPeer(socketHash);
+    _this.on('socketJoin', function (socketData) {
+      _this.addToQueue(socketData.socketHash, function () {
+        return _this.connectToPeer(socketData);
       });
     });
 
-    _this.on('socketLeave', function (socketHash) {
-      _this.addToQueue(socketHash, function () {
-        return _this.disconnectFromPeer(socketHash);
+    _this.on('socketLeave', function (socketData) {
+      _this.addToQueue(socketData.socketHash, function () {
+        return _this.disconnectFromPeer(socketData);
       });
     });
 
@@ -271,8 +416,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         try {
           yield Promise.all([this.braidClient.subscribe(this.name), this.braidClient.addServerEventListener(this.name, this.handleMessage.bind(this))]);
-          yield this.braidClient.startPublishing(this.name);
           yield promise;
+          yield this.braidClient.startPublishing(this.name);
         } catch (error) {
           this.braidClient.logger.error("Unable to join ".concat(this.roomId));
           throw error;
@@ -357,19 +502,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "connectToPeer",
     value: function () {
-      var _connectToPeer = _asyncToGenerator(function* (socketHash) {
+      var _connectToPeer = _asyncToGenerator(function* (_ref) {
         var _this5 = this;
 
-        var _socketHash$split = socketHash.split(':'),
-            _socketHash$split2 = _slicedToArray(_socketHash$split, 3),
-            peerId = _socketHash$split2[0],
-            serverIdString = _socketHash$split2[1],
-            socketIdString = _socketHash$split2[2];
-
-        var serverId = parseInt(serverIdString, 10);
-        var socketId = parseInt(socketIdString, 10);
+        var userId = _ref.userId,
+            serverId = _ref.serverId,
+            socketId = _ref.socketId,
+            socketHash = _ref.socketHash;
         var peer = new _simplePeer.default({
-          initiator: peerId > this.userId,
+          initiator: userId > this.userId,
           wrtc: this.wrtc
         });
         this.peerMap.set(socketHash, peer);
@@ -399,7 +540,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               peer.removeListener('close', handlePeerClose);
 
               _this5.emit('disconnect', {
-                peerId: peerId,
+                userId: userId,
                 serverId: serverId,
                 socketId: socketId,
                 peer: peer
@@ -413,7 +554,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
               _this5.emit('peerError', {
                 error: error,
-                peerId: peerId,
+                userId: userId,
                 serverId: serverId,
                 socketId: socketId,
                 peer: peer
@@ -424,7 +565,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             peer.addListener('error', handlePeerError);
 
             _this5.emit('connect', {
-              peerId: peerId,
+              userId: userId,
               serverId: serverId,
               socketId: socketId,
               peer: peer
@@ -434,10 +575,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref = _asyncToGenerator(function* (data) {
+            var _ref2 = _asyncToGenerator(function* (data) {
               try {
                 yield _this5.publish(_constants.SIGNAL, {
-                  peerId: peerId,
                   serverId: serverId,
                   socketId: socketId,
                   data: data
@@ -450,7 +590,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleSignal(_x4) {
-              return _ref.apply(this, arguments);
+              return _ref2.apply(this, arguments);
             };
           }();
 
@@ -473,7 +613,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
             _this5.removeListener('close', handleClose);
 
-            _this5.logger.error("Error connecting to ".concat(peerId));
+            _this5.logger.error("Error connecting to ".concat(userId));
 
             _this5.logger.errorStack(error);
 
@@ -508,7 +648,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "disconnectFromPeer",
     value: function () {
-      var _disconnectFromPeer = _asyncToGenerator(function* (socketHash) {
+      var _disconnectFromPeer = _asyncToGenerator(function* (_ref3) {
+        var socketHash = _ref3.socketHash;
         var peer = this.peerMap.get(socketHash);
 
         if (typeof peer === 'undefined') {
@@ -530,19 +671,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     value: function () {
       var _onIdle = _asyncToGenerator(function* () {
         while (this.queueMap.size > 0) {
-          var _iterator5 = _createForOfIteratorHelper(this.queueMap.values()),
-              _step5;
+          var _iterator12 = _createForOfIteratorHelper(this.queueMap.values()),
+              _step12;
 
           try {
-            for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
-              var queue = _step5.value;
+            for (_iterator12.s(); !(_step12 = _iterator12.n()).done;) {
+              var queue = _step12.value;
               yield queue.onIdle();
             } // $FlowFixMe
 
           } catch (err) {
-            _iterator5.e(err);
+            _iterator12.e(err);
           } finally {
-            _iterator5.f();
+            _iterator12.f();
           }
 
           yield new Promise(function (resolve) {
@@ -635,16 +776,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       switch (type) {
         case _constants.SIGNAL:
           try {
-            var peerId = value.peerId,
-                serverId = value.serverId,
+            var serverId = value.serverId,
                 socketId = value.socketId,
                 data = value.data;
-
-            if (typeof peerId !== 'string') {
-              this.logger.error('Signal message contained an invalid peer ID');
-              this.logger.error(JSON.stringify(message));
-              return;
-            }
 
             if (typeof serverId !== 'number') {
               this.logger.error('Signal message contained an invalid server ID');
@@ -664,7 +798,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return;
             }
 
-            var socketHash = "".concat(peerId, ":").concat(serverId, ":").concat(socketId);
+            var socketHash = "".concat(socketId, ":").concat(serverId);
             var peer = this.peerMap.get(socketHash);
 
             if (typeof peer === 'undefined') {
@@ -694,7 +828,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "close",
     value: function close() {
-      var oldSocketHashes = _toConsumableArray(this.socketHashSet);
+      var oldSocketMap = _toConsumableArray(this.socketMap.keys());
 
       var oldUserIds = _toConsumableArray(this.userIds);
 
@@ -702,35 +836,35 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       this.braidClient.stopPublishing(this.name);
       this.braidClient.unsubscribe(this.name);
       this.braidClient.removeServerEventListener(this.name);
-      this.socketHashSet.clear();
+      this.socketMap.clear();
       this.userIds.clear();
 
-      var _iterator6 = _createForOfIteratorHelper(oldSocketHashes),
-          _step6;
+      var _iterator13 = _createForOfIteratorHelper(oldSocketMap),
+          _step13;
 
       try {
-        for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
-          var socketHash = _step6.value;
+        for (_iterator13.s(); !(_step13 = _iterator13.n()).done;) {
+          var socketHash = _step13.value;
           this.emit('socketLeave', socketHash);
         }
       } catch (err) {
-        _iterator6.e(err);
+        _iterator13.e(err);
       } finally {
-        _iterator6.f();
+        _iterator13.f();
       }
 
-      var _iterator7 = _createForOfIteratorHelper(oldUserIds),
-          _step7;
+      var _iterator14 = _createForOfIteratorHelper(oldUserIds),
+          _step14;
 
       try {
-        for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
-          var userId = _step7.value;
+        for (_iterator14.s(); !(_step14 = _iterator14.n()).done;) {
+          var userId = _step14.value;
           this.emit('leave', userId);
         }
       } catch (err) {
-        _iterator7.e(err);
+        _iterator14.e(err);
       } finally {
-        _iterator7.f();
+        _iterator14.f();
       }
 
       this.emit('close');
