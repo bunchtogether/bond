@@ -21,7 +21,7 @@ function readPing(decoded: number) {
 
 addExtension({
   Class: Ping,
-  type: 0x1,
+  type: 0x90,
   write: writePing,
   read: readPing,
 });
@@ -45,7 +45,7 @@ function readPong(decoded:[number, number]) {
 
 addExtension({
   Class: Pong,
-  type: 0x2,
+  type: 0x91,
   write: writePong,
   read: readPong,
 });
@@ -67,7 +67,7 @@ function readObservedRemoveDump(decoded:[Array<*>, Array<*>]) {
 
 addExtension({
   Class: ObservedRemoveDump,
-  type: 0x3,
+  type: 0x92,
   write: writeObservedRemoveDump,
   read: readObservedRemoveDump,
 });
