@@ -1,8 +1,11 @@
 import EventEmitter from 'events';
+import ObservedRemoveMap from 'observed-remove/dist/map';
 import SimplePeer from 'simple-peer';
 import PQueue from 'p-queue';
-import { SIGNAL, START_SESSION, LEAVE_SESSION, RESPONSE } from './constants';
-import { RequestError, RequestTimeoutError } from './errors';
+import { pack, unpack } from 'msgpackr';
+import { SIGNAL, START_SESSION, LEAVE_SESSION, JOIN_SESSION, SESSION_QUEUE, ABORT_SESSION_JOIN_REQUEST, SESSION_JOIN_REQUEST, SESSION_JOIN_RESPONSE, RESPONSE } from './constants';
+import { RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError } from './errors';
+import { Ping, Pong, ObservedRemoveDump } from './messagepack';
 
 const getSocketMap = values => {
   if (typeof values === 'undefined') {
@@ -35,20 +38,40 @@ const getSessionMap = socketMap => {
 
   for (const socket of socketMap.values()) {
     const {
-      socketHash,
+      clientId,
       sessionId
     } = socket;
-    const sessionSocketMap = map.get(sessionId);
 
-    if (typeof sessionSocketMap === 'undefined') {
-      map.set(sessionId, new Map([[socketHash, socket]]));
+    if (sessionId === false) {
+      continue;
+    }
+
+    const sessionClientMap = map.get(sessionId);
+
+    if (typeof sessionClientMap === 'undefined') {
+      map.set(sessionId, new Map([[clientId, socket]]));
     } else {
-      sessionSocketMap.set(socketHash, socket);
+      sessionClientMap.set(clientId, socket);
     }
   }
 
   return map;
-};
+}; // $FlowFixMe
+
+
+class CustomObservedRemoveMap extends ObservedRemoveMap {
+  // $FlowFixMe
+  dequeue() {
+    if (this.publishTimeout) {
+      return;
+    }
+
+    this.publishTimeout = true; // $FlowFixMe
+
+    queueMicrotask(() => this.publish());
+  }
+
+}
 
 export class Bond extends EventEmitter {
   constructor(braidClient, roomId, userId, options = {}) {
@@ -56,14 +79,13 @@ export class Bond extends EventEmitter {
     this.active = true;
     this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     this.roomId = roomId;
-    this.userId = userId;
     const name = `signal/${this.roomId}`;
     this.name = name;
     this.publishName = `signal/${this.roomId}/${this.clientId.toString(36)}`;
     this.braidClient = braidClient;
     this.ready = this.init();
     this.logger = options.logger || braidClient.logger;
-    this.wrtc = options.wrtc;
+    this.peerOptions = options.peerOptions;
     this.socketMap = new Map();
     this.userIds = new Set();
     this.peerMap = new Map();
@@ -71,7 +93,14 @@ export class Bond extends EventEmitter {
     this.sessionMap = new Map();
     this.requestCallbackMap = new Map();
     this.signalQueueMap = new Map();
-    this.peerDisconnectTimeouts = new Map();
+    this.peerDisconnectTimeoutMap = new Map();
+    this.sessionJoinHandlerMap = new Map();
+    this.sessionJoinRequestMap = new Map();
+    this.data = new CustomObservedRemoveMap([], {
+      bufferPublishing: 0
+    });
+    this.sessionClientOffsetMap = new Map();
+    this.addListener('sessionClientJoin', this.handleSessionClientJoin.bind(this));
 
     this.handleSet = (key, values) => {
       if (key !== name) {
@@ -85,9 +114,11 @@ export class Bond extends EventEmitter {
       const newUserIds = getPeerIds(values);
       const oldSessionMap = this.sessionMap;
       const newSessionMap = getSessionMap(newSocketMap);
+      const oldSessionClientIds = this.sessionClientIds;
       this.userIds = newUserIds;
       this.socketMap = newSocketMap;
       this.sessionMap = newSessionMap;
+      const newSessionClientIds = this.sessionClientIds;
 
       for (const [socketHash, socketData] of oldSocketMap) {
         if (!newSocketMap.has(socketHash)) {
@@ -110,6 +141,26 @@ export class Bond extends EventEmitter {
       for (const peerUserId of newUserIds) {
         if (!oldUserIds.has(peerUserId)) {
           this.emit('join', peerUserId);
+        }
+      }
+
+      for (const clientId of oldSessionClientIds) {
+        if (clientId === this.clientId) {
+          continue;
+        }
+
+        if (!newSessionClientIds.has(clientId)) {
+          this.emit('sessionClientLeave', clientId);
+        }
+      }
+
+      for (const clientId of newSessionClientIds) {
+        if (clientId === this.clientId) {
+          continue;
+        }
+
+        if (!oldSessionClientIds.has(clientId)) {
+          this.emit('sessionClientJoin', clientId);
         }
       }
 
@@ -152,10 +203,14 @@ export class Bond extends EventEmitter {
         clientId
       } = socketData;
 
-      if (this.peerDisconnectTimeouts.has(clientId)) {
+      if (clientId === this.clientId) {
+        return;
+      }
+
+      if (this.peerDisconnectTimeoutMap.has(clientId)) {
         this.logger.info(`Clearing client ${clientId} disconnect timeout after socket join`);
-        clearTimeout(this.peerDisconnectTimeouts.get(clientId));
-        this.peerDisconnectTimeouts.delete(clientId);
+        clearTimeout(this.peerDisconnectTimeoutMap.get(clientId));
+        this.peerDisconnectTimeoutMap.delete(clientId);
       }
 
       this.addToQueue(clientId, () => this.connectToPeer(socketData));
@@ -164,11 +219,16 @@ export class Bond extends EventEmitter {
       const {
         clientId
       } = socketData;
-      clearTimeout(this.peerDisconnectTimeouts.get(clientId));
+
+      if (clientId === this.clientId) {
+        return;
+      }
+
+      clearTimeout(this.peerDisconnectTimeoutMap.get(clientId));
 
       if (this.active) {
-        this.peerDisconnectTimeouts.set(clientId, setTimeout(() => {
-          this.peerDisconnectTimeouts.delete(clientId);
+        this.peerDisconnectTimeoutMap.set(clientId, setTimeout(() => {
+          this.peerDisconnectTimeoutMap.delete(clientId);
           this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
         }, 15000));
       } else {
@@ -195,12 +255,21 @@ export class Bond extends EventEmitter {
       }
 
       const startedSessionId = this.startedSessionId;
+      const joinedSessionId = this.joinedSessionId;
 
       const handleInitialized = () => {
         if (typeof startedSessionId === 'string') {
           this.logger.info(`Restarting session ${startedSessionId}`);
           this.startSession(startedSessionId).catch(error => {
             this.logger.error(`Unable to restart session ${startedSessionId} after reconnect`);
+            this.logger.errorStack(error);
+          });
+        }
+
+        if (typeof joinedSessionId === 'string') {
+          this.logger.info(`Rejoining session ${joinedSessionId}`);
+          this.joinSession(joinedSessionId).catch(error => {
+            this.logger.error(`Unable to rejoin session ${joinedSessionId} after reconnect`);
             this.logger.errorStack(error);
           });
         }
@@ -231,6 +300,24 @@ export class Bond extends EventEmitter {
       this.braidClient.addListener('close', handleClose);
       this.braidClient.addListener('error', handleError);
     });
+  }
+
+  get sessionClientIds() {
+    const sessionId = this.sessionId;
+
+    if (typeof sessionId !== 'string') {
+      return new Set();
+    }
+
+    const sessionClientMap = this.sessionMap.get(sessionId);
+
+    if (typeof sessionClientMap === 'undefined') {
+      return new Set();
+    }
+
+    const clientIds = new Set(sessionClientMap.keys());
+    clientIds.delete(this.clientId);
+    return clientIds;
   }
 
   async init() {
@@ -298,18 +385,29 @@ export class Bond extends EventEmitter {
     return promise;
   }
 
-  async publish(type, value, timeoutDuration = 5000) {
+  async publish(type, value, options = {}) {
     await this.ready;
+    const timeoutDuration = typeof options.timeoutDuration === 'number' ? options.timeoutDuration : 5000;
+    const CustomError = typeof options.CustomError === 'function' ? options.CustomError : RequestError;
     const requestId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     return new Promise((resolve, reject) => {
+      const handleClose = () => {
+        this.requestCallbackMap.delete(requestId);
+        clearTimeout(timeout);
+        this.removeListener('close', handleClose);
+        reject(new ClientClosedError(`Client closed before ${type} request completed`));
+      };
+
       const timeout = setTimeout(() => {
         this.requestCallbackMap.delete(requestId);
+        this.removeListener('close', handleClose);
         reject(new RequestTimeoutError(`${type} requested timed out after ${timeoutDuration}ms`));
       }, timeoutDuration);
 
       const handleResponse = (success, code, text) => {
         this.requestCallbackMap.delete(requestId);
         clearTimeout(timeout);
+        this.removeListener('close', handleClose);
 
         if (success) {
           resolve({
@@ -319,9 +417,10 @@ export class Bond extends EventEmitter {
           return;
         }
 
-        reject(new RequestError(text, code));
+        reject(new CustomError(text, code));
       };
 
+      this.addListener('close', handleClose);
       this.requestCallbackMap.set(requestId, handleResponse);
       this.braidClient.publish(this.publishName, {
         requestId,
@@ -329,6 +428,16 @@ export class Bond extends EventEmitter {
         value
       });
     });
+  }
+
+  isConnectedToClient(clientId) {
+    const peer = this.peerMap.get(clientId);
+
+    if (typeof peer === 'undefined') {
+      return false;
+    }
+
+    return !!peer.connected;
   }
 
   async connectToPeer({
@@ -339,10 +448,10 @@ export class Bond extends EventEmitter {
     socketHash
   }) {
     const existingPeer = this.peerMap.get(clientId);
-    const peer = existingPeer || new SimplePeer({
-      initiator: userId > this.userId,
-      wrtc: this.wrtc
-    });
+    const options = Object.assign({}, {
+      initiator: clientId > this.clientId
+    }, this.peerOptions);
+    const peer = existingPeer || new SimplePeer(options);
     this.peerMap.set(clientId, peer);
 
     if (peer.connected) {
@@ -462,6 +571,8 @@ export class Bond extends EventEmitter {
             serverId,
             socketId,
             data
+          }, {
+            CustomError: SignalError
           });
         } catch (error) {
           this.logger.error(`Unable to signal ${socketHash}`);
@@ -549,19 +660,89 @@ export class Bond extends EventEmitter {
     }
   }
 
-  async startSession(sessionId) {
-    await this.publish(START_SESSION, {
+  cleanupSession(newSessionId) {
+    const startedSessionId = this.startedSessionId;
+    delete this.startedSessionId;
+    delete this.joinedSessionId;
+
+    if (typeof startedSessionId === 'string') {
+      this.sessionJoinHandlerMap.delete(startedSessionId);
+    }
+
+    const oldSessionId = this.sessionId;
+
+    if (oldSessionId === newSessionId) {
+      return;
+    }
+
+    const oldSessionClientIds = this.sessionClientIds;
+    this.sessionId = newSessionId;
+    const newSessionClientIds = this.sessionClientIds;
+
+    for (const clientId of oldSessionClientIds) {
+      if (clientId === this.clientId) {
+        continue;
+      }
+
+      if (!newSessionClientIds.has(clientId)) {
+        this.emit('sessionClientLeave', clientId);
+      }
+    }
+
+    const timelineValue = this.data.get(this.clientId);
+    this.data.clear();
+    this.sessionClientOffsetMap.clear();
+
+    if (typeof timelineValue !== 'undefined') {
+      this.data.set(this.clientId);
+    }
+
+    for (const clientId of newSessionClientIds) {
+      if (clientId === this.clientId) {
+        continue;
+      }
+
+      if (!oldSessionClientIds.has(clientId)) {
+        this.emit('sessionClientJoin', clientId);
+      }
+    }
+  }
+
+  async startSession(sessionId, sessionJoinHandler) {
+    await this.addToQueue(SESSION_QUEUE, () => this.publish(START_SESSION, {
       sessionId
-    });
+    }, {
+      CustomError: StartSessionError
+    }));
+    this.cleanupSession(sessionId);
     this.startedSessionId = sessionId;
+
+    if (typeof sessionJoinHandler === 'function') {
+      this.sessionJoinHandlerMap.set(sessionId, sessionJoinHandler);
+    } else {
+      this.sessionJoinHandlerMap.set(sessionId, () => [true, 200, 'Authorized']);
+    }
+  }
+
+  async joinSession(sessionId, timeoutDuration = 30000) {
+    await this.addToQueue(SESSION_QUEUE, () => this.publish(JOIN_SESSION, {
+      sessionId,
+      timeoutDuration
+    }, {
+      CustomError: JoinSessionError
+    }));
+    this.cleanupSession(sessionId);
+    this.joinedSessionId = sessionId;
   }
 
   async leaveSession() {
-    await this.publish(LEAVE_SESSION, {});
-    delete this.startedSessionId;
+    await this.addToQueue(SESSION_QUEUE, () => this.publish(LEAVE_SESSION, {}, {
+      CustomError: LeaveSessionError
+    }));
+    this.cleanupSession();
   }
 
-  handleMessage(message) {
+  async handleMessage(message) {
     if (typeof message !== 'object') {
       this.logger.error('Invalid message format');
       this.logger.error(JSON.stringify(message));
@@ -679,13 +860,243 @@ export class Bond extends EventEmitter {
 
         break;
 
+      case ABORT_SESSION_JOIN_REQUEST:
+        try {
+          const {
+            userId,
+            sessionId
+          } = value;
+
+          if (typeof userId !== 'string') {
+            this.logger.error('Abort session join request contained an invalid user ID');
+            this.logger.error(JSON.stringify(message));
+            return;
+          }
+
+          if (typeof sessionId !== 'string') {
+            this.logger.error('Abort session join request contained an invalid session ID');
+            this.logger.error(JSON.stringify(message));
+            return;
+          }
+
+          const requestHash = `${userId}:${sessionId}`;
+          const existing = this.sessionJoinRequestMap.get(requestHash);
+
+          if (!Array.isArray(existing)) {
+            this.logger.warn(`Unable to abort session join request for user ${userId} and session ${sessionId}, request does not exist`);
+            return;
+          }
+
+          this.logger.warn(`Aborting session join request for user ${userId} and session ${sessionId}`);
+          existing[1].abort();
+        } catch (error) {
+          this.logger.error('Unable to process session abort join request');
+          this.logger.errorStack(error);
+        }
+
+        break;
+
+      case SESSION_JOIN_REQUEST:
+        try {
+          const {
+            userId,
+            sessionId
+          } = value;
+
+          if (typeof userId !== 'string') {
+            this.logger.error('Session join request contained an invalid user ID');
+            this.logger.error(JSON.stringify(message));
+            return;
+          }
+
+          if (typeof sessionId !== 'string') {
+            this.logger.error('Session join request contained an invalid session ID');
+            this.logger.error(JSON.stringify(message));
+            return;
+          }
+
+          const requestHash = `${userId}:${sessionId}`;
+          const existing = this.sessionJoinRequestMap.get(requestHash);
+
+          if (Array.isArray(existing)) {
+            this.logger.warn(`Session join request for user ${userId} and session ${sessionId} already exists`);
+            await existing[0];
+            return;
+          }
+
+          const sessionJoinHandler = this.sessionJoinHandlerMap.get(sessionId);
+
+          if (typeof sessionJoinHandler !== 'function') {
+            this.logger.error(`Handler for session ${sessionId} does not exist`);
+            return;
+          }
+
+          const abortController = new AbortController();
+          abortController.signal.addEventListener('abort', () => {
+            this.sessionJoinRequestMap.delete(requestHash);
+          });
+
+          const promise = (async () => {
+            let response = [false, 500, 'Error in sesssion join handler'];
+
+            try {
+              response = await sessionJoinHandler({
+                userId,
+                sessionId,
+                abortSignal: abortController.signal
+              });
+            } catch (error) {
+              this.logger.error(`Unable to respond to session join request for user ${userId} and session ${sessionId}, error in session join handler`);
+              this.logger.errorStack(error);
+            }
+
+            if (abortController.signal.aborted) {
+              this.logger.warn(`Session join request for user ${userId} and session ${sessionId} was aborted`);
+              return;
+            }
+
+            try {
+              await this.publish(SESSION_JOIN_RESPONSE, {
+                userId,
+                sessionId,
+                success: response[0],
+                code: response[1],
+                text: response[2]
+              }, {
+                CustomError: SessionJoinResponseError
+              });
+            } catch (error) {
+              this.logger.error(`Unable to send session join request for user ${userId} and session ${sessionId}`);
+              this.logger.errorStack(error);
+            }
+
+            this.sessionJoinRequestMap.delete(requestHash);
+          })();
+
+          this.sessionJoinRequestMap.set(requestHash, [promise, abortController]);
+          await promise;
+        } catch (error) {
+          this.logger.error('Unable to process session join request');
+          this.logger.errorStack(error);
+        }
+
+        break;
+
       default:
         this.logger.warn(`Unknown message type ${type}`);
     }
   }
 
+  async handleSessionClientJoin(clientId) {
+    let interval;
+    let offset = 0;
+    const abortController = new AbortController();
+    const abortSignal = abortController.signal;
+
+    const cleanup = () => {
+      abortController.abort();
+      this.removeListener('sessionClientLeave', handleSessionClientLeave);
+
+      if (typeof peer !== 'undefined') {
+        peer.removeListener('close', handlePeerClose);
+        peer.removeListener('data', handlePeerData);
+      }
+
+      this.data.removeListener('publish', handleDataPublish);
+      clearInterval(interval);
+    };
+
+    const handlePeerClose = () => {
+      cleanup();
+
+      if (this.sessionClientIds.has(clientId)) {
+        this.handleSessionClientJoin(clientId);
+      }
+    };
+
+    const handleSessionClientLeave = oldClientId => {
+      if (clientId !== oldClientId) {
+        return;
+      }
+
+      cleanup();
+    };
+
+    const handleDataPublish = queue => {
+      sendToPeer(new ObservedRemoveDump(queue));
+    };
+
+    const sendToPeer = unpacked => {
+      if (typeof peer === 'undefined') {
+        throw new Error('Peer does not exist');
+      }
+
+      peer.send(pack(unpacked));
+    };
+
+    const handlePeerData = packed => {
+      const message = unpack(packed);
+
+      if (message instanceof Ping) {
+        sendToPeer(new Pong(message.timestamp, Date.now()));
+      } else if (message instanceof Pong) {
+        offset = Date.now() - message.wallclock - (performance.now() - message.timestamp) / 2;
+        this.sessionClientOffsetMap.set(clientId, offset);
+      } else if (message instanceof ObservedRemoveDump) {
+        this.data.process(message.queue);
+      }
+    };
+
+    this.addListener('sessionClientLeave', handleSessionClientLeave);
+
+    if (!this.isConnectedToClient(clientId)) {
+      await new Promise(resolve => {
+        const handleConnect = ({
+          clientId: newClientId
+        }) => {
+          if (newClientId !== clientId) {
+            return;
+          }
+
+          this.removeListener('connect', handleConnect);
+          abortSignal.removeEventListener('abort', handleAbort);
+          resolve();
+        };
+
+        const handleAbort = () => {
+          this.removeListener('connect', handleConnect);
+          abortSignal.removeEventListener('abort', handleAbort);
+          resolve();
+        };
+
+        this.addListener('connect', handleConnect);
+        abortSignal.addEventListener('abort', handleAbort);
+      });
+
+      if (abortSignal.aborted) {
+        return;
+      }
+    }
+
+    const peer = this.peerMap.get(clientId);
+
+    if (typeof peer === 'undefined') {
+      throw new Error('Peer does not exist');
+    }
+
+    peer.addListener('close', handlePeerClose);
+    peer.addListener('data', handlePeerData);
+    interval = setInterval(() => {
+      peer.send(pack(new Ping(performance.now())));
+    }, 1000);
+    peer.send(pack(new Ping(performance.now())));
+    this.data.addListener('publish', handleDataPublish);
+    handleDataPublish(this.data.dump());
+  }
+
   close() {
     this.active = false;
+    const oldSessionClientIds = this.sessionClientIds;
     const oldSocketData = [...this.socketMap.values()];
     const oldUserIds = [...this.userIds];
     this.braidClient.data.removeListener('set', this.handleSet);
@@ -695,8 +1106,12 @@ export class Bond extends EventEmitter {
     this.socketMap.clear();
     this.userIds.clear();
 
-    for (const timeout of this.peerDisconnectTimeouts.values()) {
+    for (const timeout of this.peerDisconnectTimeoutMap.values()) {
       clearTimeout(timeout);
+    }
+
+    for (const clientId of oldSessionClientIds) {
+      this.emit('sessionClientLeave', clientId);
     }
 
     for (const socketData of oldSocketData) {
