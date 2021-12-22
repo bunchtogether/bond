@@ -618,6 +618,13 @@ export class Bond extends EventEmitter {
     }
   }
 
+  didStartSession() {
+    if (!this.sessionId) {
+      return false;
+    }
+    return this.startedSessionId === this.sessionId;
+  }
+
   async startSession(sessionId:string, sessionJoinHandler?: SessionJoinHandler) {
     await this.addToQueue(SESSION_QUEUE, () => this.publish(START_SESSION, { sessionId }, { CustomError: StartSessionError }));
     this.cleanupSession(sessionId);
@@ -627,6 +634,13 @@ export class Bond extends EventEmitter {
     } else {
       this.sessionJoinHandlerMap.set(sessionId, () => [true, 200, 'Authorized']);
     }
+  }
+
+  didJoinSession() {
+    if (!this.sessionId) {
+      return false;
+    }
+    return this.joinedSessionId === this.sessionId;
   }
 
   async joinSession(sessionId:string, timeoutDuration?: number = 30000) {
@@ -829,15 +843,16 @@ export class Bond extends EventEmitter {
 
   async handleSessionClientJoin(clientId:number) {
     let interval;
+    let _peer; // eslint-disable-line no-underscore-dangle
     let offset = 0;
     const abortController = new AbortController();
     const abortSignal = abortController.signal;
     const cleanup = () => {
       abortController.abort();
       this.removeListener('sessionClientLeave', handleSessionClientLeave);
-      if (typeof peer !== 'undefined') {
-        peer.removeListener('close', handlePeerClose);
-        peer.removeListener('data', handlePeerData);
+      if (typeof _peer !== 'undefined') {
+        _peer.removeListener('close', handlePeerClose);
+        _peer.removeListener('data', handlePeerData);
       }
       this.data.removeListener('publish', handleDataPublish);
       clearInterval(interval);
@@ -898,6 +913,7 @@ export class Bond extends EventEmitter {
       }
     }
     const peer = this.peerMap.get(clientId);
+    _peer = peer;
     if (typeof peer === 'undefined') {
       throw new Error('Peer does not exist');
     }

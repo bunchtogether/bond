@@ -1156,6 +1156,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       }
     }
   }, {
+    key: "didStartSession",
+    value: function didStartSession() {
+      if (!this.sessionId) {
+        return false;
+      }
+
+      return this.startedSessionId === this.sessionId;
+    }
+  }, {
     key: "startSession",
     value: function () {
       var _startSession = _asyncToGenerator(function* (sessionId, sessionJoinHandler) {
@@ -1186,6 +1195,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
       return startSession;
     }()
+  }, {
+    key: "didJoinSession",
+    value: function didJoinSession() {
+      if (!this.sessionId) {
+        return false;
+      }
+
+      return this.joinedSessionId === this.sessionId;
+    }
   }, {
     key: "joinSession",
     value: function () {
@@ -1488,6 +1506,10 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         var _this11 = this;
 
         var interval;
+
+        var _peer; // eslint-disable-line no-underscore-dangle
+
+
         var offset = 0;
         var abortController = new AbortController();
         var abortSignal = abortController.signal;
@@ -1497,9 +1519,10 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
           _this11.removeListener('sessionClientLeave', handleSessionClientLeave);
 
-          if (typeof peer !== 'undefined') {
-            peer.removeListener('close', handlePeerClose);
-            peer.removeListener('data', handlePeerData);
+          if (typeof _peer !== 'undefined') {
+            _peer.removeListener('close', handlePeerClose);
+
+            _peer.removeListener('data', handlePeerData);
           }
 
           _this11.data.removeListener('publish', handleDataPublish);
@@ -1584,6 +1607,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
 
         var peer = this.peerMap.get(clientId);
+        _peer = peer;
 
         if (typeof peer === 'undefined') {
           throw new Error('Peer does not exist');
