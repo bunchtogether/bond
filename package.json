@@ -1,6 +1,6 @@
 {
   "name": "@bunchtogether/bond",
-  "version": "1.0.02",
+  "version": "1.0.03",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
   "exports": {
@@ -59,7 +59,6 @@
     "msgpackr": "^1.5.1",
     "observed-remove": "^2.2.27",
     "p-queue": "^6.6.2",
-    "simple-peer": "^9.11.0",
-    "uuid": "^3.2.1"
+    "simple-peer": "^9.11.0"
   }
 }
