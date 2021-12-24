@@ -5,7 +5,7 @@ function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" =
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.LeaveSessionError = exports.JoinSessionError = exports.ClientClosedError = void 0;
+exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.LeaveSessionError = exports.JoinSessionError = exports.InviteToSessionError = exports.ClientClosedError = void 0;
 
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
@@ -154,19 +154,39 @@ var LeaveSessionError = /*#__PURE__*/function (_RequestError3) {
 
 exports.LeaveSessionError = LeaveSessionError;
 
-var SignalError = /*#__PURE__*/function (_RequestError4) {
-  _inherits(SignalError, _RequestError4);
+var InviteToSessionError = /*#__PURE__*/function (_RequestError4) {
+  _inherits(InviteToSessionError, _RequestError4);
 
-  var _super7 = _createSuper(SignalError);
+  var _super7 = _createSuper(InviteToSessionError);
+
+  function InviteToSessionError(message, code) {
+    var _this7;
+
+    _classCallCheck(this, InviteToSessionError);
+
+    _this7 = _super7.call(this, message, code);
+    _this7.name = 'InviteToSessionError';
+    return _this7;
+  }
+
+  return _createClass(InviteToSessionError);
+}(RequestError);
+
+exports.InviteToSessionError = InviteToSessionError;
+
+var SignalError = /*#__PURE__*/function (_RequestError5) {
+  _inherits(SignalError, _RequestError5);
+
+  var _super8 = _createSuper(SignalError);
 
   function SignalError(message, code) {
-    var _this7;
+    var _this8;
 
     _classCallCheck(this, SignalError);
 
-    _this7 = _super7.call(this, message, code);
-    _this7.name = 'SignalError';
-    return _this7;
+    _this8 = _super8.call(this, message, code);
+    _this8.name = 'SignalError';
+    return _this8;
   }
 
   return _createClass(SignalError);
@@ -174,19 +194,19 @@ var SignalError = /*#__PURE__*/function (_RequestError4) {
 
 exports.SignalError = SignalError;
 
-var SessionJoinResponseError = /*#__PURE__*/function (_RequestError5) {
-  _inherits(SessionJoinResponseError, _RequestError5);
+var SessionJoinResponseError = /*#__PURE__*/function (_RequestError6) {
+  _inherits(SessionJoinResponseError, _RequestError6);
 
-  var _super8 = _createSuper(SessionJoinResponseError);
+  var _super9 = _createSuper(SessionJoinResponseError);
 
   function SessionJoinResponseError(message, code) {
-    var _this8;
+    var _this9;
 
     _classCallCheck(this, SessionJoinResponseError);
 
-    _this8 = _super8.call(this, message, code);
-    _this8.name = 'SessionJoinResponseError';
-    return _this8;
+    _this9 = _super9.call(this, message, code);
+    _this9.name = 'SessionJoinResponseError';
+    return _this9;
   }
 
   return _createClass(SessionJoinResponseError);

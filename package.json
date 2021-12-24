@@ -59,6 +59,7 @@
     "msgpackr": "^1.5.1",
     "observed-remove": "^2.2.27",
     "p-queue": "^6.6.2",
-    "simple-peer": "^9.11.0"
+    "simple-peer": "^9.11.0",
+    "uuid": "^3.2.1"
   }
 }

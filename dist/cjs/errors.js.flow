@@ -45,6 +45,13 @@ export class LeaveSessionError extends RequestError {
   }
 }
 
+export class InviteToSessionError extends RequestError {
+  constructor(message:string, code:number) {
+    super(message, code);
+    this.name = 'InviteToSessionError';
+  }
+}
+
 export class SignalError extends RequestError {
   constructor(message:string, code:number) {
     super(message, code);

@@ -110,11 +110,6 @@ var getSessionMap = function getSessionMap(socketMap) {
       var socket = _step.value;
       var clientId = socket.clientId,
           sessionId = socket.sessionId;
-
-      if (sessionId === false) {
-        continue;
-      }
-
       var sessionClientMap = map.get(sessionId);
 
       if (typeof sessionClientMap === 'undefined') {
@@ -130,98 +125,73 @@ var getSessionMap = function getSessionMap(socketMap) {
   }
 
   return map;
-}; // $FlowFixMe
-
-
-var CustomObservedRemoveMap = /*#__PURE__*/function (_ObservedRemoveMap) {
-  _inherits(CustomObservedRemoveMap, _ObservedRemoveMap);
-
-  var _super = _createSuper(CustomObservedRemoveMap);
-
-  function CustomObservedRemoveMap() {
-    _classCallCheck(this, CustomObservedRemoveMap);
-
-    return _super.apply(this, arguments);
-  }
-
-  _createClass(CustomObservedRemoveMap, [{
-    key: "dequeue",
-    value: // $FlowFixMe
-    function dequeue() {
-      var _this = this;
-
-      if (this.publishTimeout) {
-        return;
-      }
-
-      this.publishTimeout = true; // $FlowFixMe
-
-      queueMicrotask(function () {
-        return _this.publish();
-      });
-    }
-  }]);
-
-  return CustomObservedRemoveMap;
-}(_map.default);
+};
 
 var Bond = /*#__PURE__*/function (_EventEmitter) {
   _inherits(Bond, _EventEmitter);
 
-  var _super2 = _createSuper(Bond);
+  var _super = _createSuper(Bond);
 
   function Bond(braidClient, roomId, userId) {
-    var _this2;
+    var _this;
 
     var options = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : {};
 
     _classCallCheck(this, Bond);
 
-    _this2 = _super2.call(this);
-    _this2.active = true;
-    _this2.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-    _this2.roomId = roomId;
-    var name = "signal/".concat(_this2.roomId);
-    _this2.name = name;
-    _this2.publishName = "signal/".concat(_this2.roomId, "/").concat(_this2.clientId.toString(36));
-    _this2.braidClient = braidClient;
-    _this2.ready = _this2.init();
-    _this2.logger = options.logger || braidClient.logger;
-    _this2.peerOptions = options.peerOptions;
-    _this2.socketMap = new Map();
-    _this2.userIds = new Set();
-    _this2.peerMap = new Map();
-    _this2.queueMap = new Map();
-    _this2.sessionMap = new Map();
-    _this2.requestCallbackMap = new Map();
-    _this2.signalQueueMap = new Map();
-    _this2.peerDisconnectTimeoutMap = new Map();
-    _this2.sessionJoinHandlerMap = new Map();
-    _this2.sessionJoinRequestMap = new Map();
-    _this2.data = new CustomObservedRemoveMap([], {
+    _this = _super.call(this);
+    _this.active = true;
+    _this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    _this.roomId = roomId;
+    var name = "signal/".concat(_this.roomId);
+    _this.name = name;
+    _this.publishName = "signal/".concat(_this.roomId, "/").concat(_this.clientId.toString(36));
+    _this.braidClient = braidClient;
+    _this.logger = options.logger || braidClient.logger;
+    _this.peerOptions = options.peerOptions;
+    _this.socketMap = new Map();
+    _this.userIds = new Set();
+    _this.peerMap = new Map();
+    _this.peerReconnectMap = new Map();
+    _this.queueMap = new Map();
+    _this.sessionMap = new Map();
+    _this.requestCallbackMap = new Map();
+    _this.signalQueueMap = new Map();
+    _this.peerDisconnectTimeoutMap = new Map();
+    _this.sessionJoinHandlerMap = new Map();
+    _this.sessionJoinRequestMap = new Map();
+    _this.data = new _map.default([], {
       bufferPublishing: 0
     });
-    _this2.sessionClientOffsetMap = new Map();
+    _this.sessionClientOffsetMap = new Map();
 
-    _this2.addListener('sessionClientJoin', _this2.handleSessionClientJoin.bind(_assertThisInitialized(_this2)));
+    _this.addListener('sessionClientJoin', _this.handleSessionClientJoin.bind(_assertThisInitialized(_this)));
 
-    _this2.handleSet = function (key, values) {
+    _this._ready = _this.init(); // eslint-disable-line no-underscore-dangle
+
+    if (typeof options.sessionId === 'string') {
+      _this.ready = _this.joinSession(options.sessionId);
+    } else {
+      _this.ready = _this._ready; // eslint-disable-line no-underscore-dangle
+    }
+
+    _this.handleSet = function (key, values) {
       if (key !== name) {
         return;
       }
 
-      _this2.active = true;
-      var oldSocketMap = _this2.socketMap;
+      _this.active = true;
+      var oldSocketMap = _this.socketMap;
       var newSocketMap = getSocketMap(values);
-      var oldUserIds = _this2.userIds;
+      var oldUserIds = _this.userIds;
       var newUserIds = getPeerIds(values);
-      var oldSessionMap = _this2.sessionMap;
+      var oldSessionMap = _this.sessionMap;
       var newSessionMap = getSessionMap(newSocketMap);
-      var oldSessionClientIds = _this2.sessionClientIds;
-      _this2.userIds = newUserIds;
-      _this2.socketMap = newSocketMap;
-      _this2.sessionMap = newSessionMap;
-      var newSessionClientIds = _this2.sessionClientIds;
+      var oldSessionClientIds = _this.sessionClientIds;
+      _this.userIds = newUserIds;
+      _this.socketMap = newSocketMap;
+      _this.sessionMap = newSessionMap;
+      var newSessionClientIds = _this.sessionClientIds;
 
       var _iterator2 = _createForOfIteratorHelper(oldSocketMap),
           _step2;
@@ -233,7 +203,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               socketData = _step2$value[1];
 
           if (!newSocketMap.has(socketHash)) {
-            _this2.emit('socketLeave', socketData);
+            _this.emit('socketLeave', socketData);
           }
         }
       } catch (err) {
@@ -252,7 +222,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               _socketData = _step3$value[1];
 
           if (!oldSocketMap.has(_socketHash)) {
-            _this2.emit('socketJoin', _socketData);
+            _this.emit('socketJoin', _socketData);
           }
         }
       } catch (err) {
@@ -269,7 +239,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           var peerUserId = _step4.value;
 
           if (!newUserIds.has(peerUserId)) {
-            _this2.emit('leave', peerUserId);
+            _this.emit('leave', peerUserId);
           }
         }
       } catch (err) {
@@ -286,7 +256,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           var _peerUserId = _step5.value;
 
           if (!oldUserIds.has(_peerUserId)) {
-            _this2.emit('join', _peerUserId);
+            _this.emit('join', _peerUserId);
           }
         }
       } catch (err) {
@@ -302,12 +272,12 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
           var clientId = _step6.value;
 
-          if (clientId === _this2.clientId) {
+          if (clientId === _this.clientId) {
             continue;
           }
 
           if (!newSessionClientIds.has(clientId)) {
-            _this2.emit('sessionClientLeave', clientId);
+            _this.emit('sessionClientLeave', clientId);
           }
         }
       } catch (err) {
@@ -323,12 +293,12 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
           var _clientId = _step7.value;
 
-          if (_clientId === _this2.clientId) {
+          if (_clientId === _this.clientId) {
             continue;
           }
 
           if (!oldSessionClientIds.has(_clientId)) {
-            _this2.emit('sessionClientJoin', _clientId);
+            _this.emit('sessionClientJoin', _clientId);
           }
         }
       } catch (err) {
@@ -356,7 +326,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
                 var _socketData2 = _step10.value;
 
-                _this2.emit('sessionLeave', _socketData2);
+                _this.emit('sessionLeave', _socketData2);
               }
             } catch (err) {
               _iterator10.e(err);
@@ -374,7 +344,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
                     _socketData3 = _step11$value[1];
 
                 if (!newSessionSocketMap.has(_socketHash2)) {
-                  _this2.emit('sessionLeave', _socketData3);
+                  _this.emit('sessionLeave', _socketData3);
                 }
               }
             } catch (err) {
@@ -409,7 +379,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               for (_iterator12.s(); !(_step12 = _iterator12.n()).done;) {
                 var _socketData4 = _step12.value;
 
-                _this2.emit('sessionJoin', _socketData4);
+                _this.emit('sessionJoin', _socketData4);
               }
             } catch (err) {
               _iterator12.e(err);
@@ -427,7 +397,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
                     _socketData5 = _step13$value[1];
 
                 if (!_oldSessionSocketMap.has(_socketHash3)) {
-                  _this2.emit('sessionJoin', _socketData5);
+                  _this.emit('sessionJoin', _socketData5);
                 }
               }
             } catch (err) {
@@ -444,60 +414,60 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       }
     };
 
-    _this2.braidClient.data.addListener('set', _this2.handleSet);
+    _this.braidClient.data.addListener('set', _this.handleSet);
 
-    _this2.addListener('socketJoin', function (socketData) {
+    _this.addListener('socketJoin', function (socketData) {
       var clientId = socketData.clientId;
 
-      if (clientId === _this2.clientId) {
+      if (clientId === _this.clientId) {
         return;
       }
 
-      if (_this2.peerDisconnectTimeoutMap.has(clientId)) {
-        _this2.logger.info("Clearing client ".concat(clientId, " disconnect timeout after socket join"));
+      if (_this.peerDisconnectTimeoutMap.has(clientId)) {
+        _this.logger.info("Clearing client ".concat(clientId, " disconnect timeout after socket join"));
 
-        clearTimeout(_this2.peerDisconnectTimeoutMap.get(clientId));
+        clearTimeout(_this.peerDisconnectTimeoutMap.get(clientId));
 
-        _this2.peerDisconnectTimeoutMap.delete(clientId);
+        _this.peerDisconnectTimeoutMap.delete(clientId);
       }
 
-      _this2.addToQueue(clientId, function () {
-        return _this2.connectToPeer(socketData);
+      _this.addToQueue(clientId, function () {
+        return _this.connectToPeer(socketData);
       });
     });
 
-    _this2.addListener('socketLeave', function (socketData) {
+    _this.addListener('socketLeave', function (socketData) {
       var clientId = socketData.clientId;
 
-      if (clientId === _this2.clientId) {
+      if (clientId === _this.clientId) {
         return;
       }
 
-      clearTimeout(_this2.peerDisconnectTimeoutMap.get(clientId));
+      clearTimeout(_this.peerDisconnectTimeoutMap.get(clientId));
 
-      if (_this2.active) {
-        _this2.peerDisconnectTimeoutMap.set(clientId, setTimeout(function () {
-          _this2.peerDisconnectTimeoutMap.delete(clientId);
+      if (_this.active) {
+        _this.peerDisconnectTimeoutMap.set(clientId, setTimeout(function () {
+          _this.peerDisconnectTimeoutMap.delete(clientId);
 
-          _this2.addToQueue(clientId, function () {
-            return _this2.disconnectFromPeer(socketData);
+          _this.addToQueue(clientId, function () {
+            return _this.disconnectFromPeer(socketData);
           });
         }, 15000));
       } else {
-        _this2.addToQueue(clientId, function () {
-          return _this2.disconnectFromPeer(socketData);
+        _this.addToQueue(clientId, function () {
+          return _this.disconnectFromPeer(socketData);
         });
       }
     });
 
-    _this2.braidClient.addListener('close', function () {
-      var oldSocketData = _toConsumableArray(_this2.socketMap.values());
+    _this.braidClient.addListener('close', function () {
+      var oldSocketData = _toConsumableArray(_this.socketMap.values());
 
-      var oldUserIds = _toConsumableArray(_this2.userIds);
+      var oldUserIds = _toConsumableArray(_this.userIds);
 
-      _this2.socketMap.clear();
+      _this.socketMap.clear();
 
-      _this2.userIds.clear();
+      _this.userIds.clear();
 
       var _iterator14 = _createForOfIteratorHelper(oldSocketData),
           _step14;
@@ -506,7 +476,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         for (_iterator14.s(); !(_step14 = _iterator14.n()).done;) {
           var socketData = _step14.value;
 
-          _this2.emit('socketLeave', socketData);
+          _this.emit('socketLeave', socketData);
         }
       } catch (err) {
         _iterator14.e(err);
@@ -521,7 +491,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         for (_iterator15.s(); !(_step15 = _iterator15.n()).done;) {
           var oldUserId = _step15.value;
 
-          _this2.emit('leave', oldUserId);
+          _this.emit('leave', oldUserId);
         }
       } catch (err) {
         _iterator15.e(err);
@@ -530,72 +500,72 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       }
     });
 
-    _this2.braidClient.addListener('reconnect', function (isReconnecting) {
+    _this.braidClient.addListener('reconnect', function (isReconnecting) {
       if (!isReconnecting) {
         return;
       }
 
-      var startedSessionId = _this2.startedSessionId;
-      var joinedSessionId = _this2.joinedSessionId;
+      var startedSessionId = _this.startedSessionId;
+      var joinedSessionId = _this.joinedSessionId;
 
       var handleInitialized = function handleInitialized() {
         if (typeof startedSessionId === 'string') {
-          _this2.logger.info("Restarting session ".concat(startedSessionId));
+          _this.logger.info("Restarting session ".concat(startedSessionId));
 
-          _this2.startSession(startedSessionId).catch(function (error) {
-            _this2.logger.error("Unable to restart session ".concat(startedSessionId, " after reconnect"));
+          _this.startSession(startedSessionId).catch(function (error) {
+            _this.logger.error("Unable to restart session ".concat(startedSessionId, " after reconnect"));
 
-            _this2.logger.errorStack(error);
+            _this.logger.errorStack(error);
           });
         }
 
         if (typeof joinedSessionId === 'string') {
-          _this2.logger.info("Rejoining session ".concat(joinedSessionId));
+          _this.logger.info("Rejoining session ".concat(joinedSessionId));
 
-          _this2.joinSession(joinedSessionId).catch(function (error) {
-            _this2.logger.error("Unable to rejoin session ".concat(joinedSessionId, " after reconnect"));
+          _this.joinSession(joinedSessionId).catch(function (error) {
+            _this.logger.error("Unable to rejoin session ".concat(joinedSessionId, " after reconnect"));
 
-            _this2.logger.errorStack(error);
+            _this.logger.errorStack(error);
           });
         }
 
-        _this2.braidClient.removeListener('initialized', handleInitialized);
+        _this.braidClient.removeListener('initialized', handleInitialized);
 
-        _this2.braidClient.removeListener('close', handleClose);
+        _this.braidClient.removeListener('close', handleClose);
 
-        _this2.braidClient.removeListener('error', handleError);
+        _this.braidClient.removeListener('error', handleError);
       };
 
       var handleClose = function handleClose() {
-        _this2.braidClient.removeListener('initialized', handleInitialized);
+        _this.braidClient.removeListener('initialized', handleInitialized);
 
-        _this2.braidClient.removeListener('close', handleClose);
+        _this.braidClient.removeListener('close', handleClose);
 
-        _this2.braidClient.removeListener('error', handleError);
+        _this.braidClient.removeListener('error', handleError);
       };
 
       var handleError = function handleError(error) {
         if (typeof startedSessionId === 'string') {
-          _this2.logger.error("Unable to restart session ".concat(startedSessionId, " after reconnect"));
+          _this.logger.error("Unable to restart session ".concat(startedSessionId, " after reconnect"));
 
-          _this2.logger.errorStack(error);
+          _this.logger.errorStack(error);
         }
 
-        _this2.braidClient.removeListener('initialized', handleInitialized);
+        _this.braidClient.removeListener('initialized', handleInitialized);
 
-        _this2.braidClient.removeListener('close', handleClose);
+        _this.braidClient.removeListener('close', handleClose);
 
-        _this2.braidClient.removeListener('error', handleError);
+        _this.braidClient.removeListener('error', handleError);
       };
 
-      _this2.braidClient.addListener('initialized', handleInitialized);
+      _this.braidClient.addListener('initialized', handleInitialized);
 
-      _this2.braidClient.addListener('close', handleClose);
+      _this.braidClient.addListener('close', handleClose);
 
-      _this2.braidClient.addListener('error', handleError);
+      _this.braidClient.addListener('error', handleError);
     });
 
-    return _this2;
+    return _this;
   }
 
   _createClass(Bond, [{
@@ -621,21 +591,21 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "init",
     value: function () {
       var _init = _asyncToGenerator(function* () {
-        var _this3 = this;
+        var _this2 = this;
 
         var promise = new Promise(function (resolve, reject) {
           var handleClose = function handleClose() {
-            _this3.removeListener('close', handleClose);
+            _this2.removeListener('close', handleClose);
 
-            _this3.braidClient.data.removeListener('set', handleValue);
+            _this2.braidClient.data.removeListener('set', handleValue);
 
-            _this3.braidClient.removeListener('error', handleError);
+            _this2.braidClient.removeListener('error', handleError);
 
             reject(new Error('Closed before initialization completed'));
           };
 
           var handleValue = function handleValue(key, value) {
-            if (key !== _this3.name) {
+            if (key !== _this2.name) {
               return;
             }
 
@@ -643,32 +613,32 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return;
             }
 
-            _this3.removeListener('close', handleClose);
+            _this2.removeListener('close', handleClose);
 
-            _this3.braidClient.data.removeListener('set', handleValue);
+            _this2.braidClient.data.removeListener('set', handleValue);
 
-            _this3.braidClient.removeListener('error', handleError);
+            _this2.braidClient.removeListener('error', handleError);
 
             resolve();
           };
 
           var handleError = function handleError(error) {
-            _this3.removeListener('close', handleClose);
+            _this2.removeListener('close', handleClose);
 
-            _this3.braidClient.data.removeListener('set', handleValue);
+            _this2.braidClient.data.removeListener('set', handleValue);
 
-            _this3.braidClient.removeListener('error', handleError);
+            _this2.braidClient.removeListener('error', handleError);
 
             reject(error);
           };
 
-          _this3.addListener('close', handleClose);
+          _this2.addListener('close', handleClose);
 
-          _this3.braidClient.data.addListener('set', handleValue);
+          _this2.braidClient.data.addListener('set', handleValue);
 
-          _this3.braidClient.addListener('error', handleError);
+          _this2.braidClient.addListener('error', handleError);
 
-          handleValue(_this3.name, _this3.braidClient.data.get(_this3.name));
+          handleValue(_this2.name, _this2.braidClient.data.get(_this2.name));
         });
 
         try {
@@ -690,7 +660,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "addToQueue",
     value: function addToQueue(queueId, func) {
-      var _this4 = this;
+      var _this3 = this;
 
       var queue = this.queueMap.get(queueId);
 
@@ -704,7 +674,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       var promise = newQueue.add(func);
       this.queueMap.set(queueId, newQueue);
       newQueue.on('idle', function () {
-        _this4.queueMap.delete(queueId);
+        _this3.queueMap.delete(queueId);
       });
       return promise;
     }
@@ -712,38 +682,39 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "publish",
     value: function () {
       var _publish = _asyncToGenerator(function* (type, value) {
-        var _this5 = this;
+        var _this4 = this;
 
         var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
-        yield this.ready;
+        yield this._ready; // eslint-disable-line no-underscore-dangle
+
         var timeoutDuration = typeof options.timeoutDuration === 'number' ? options.timeoutDuration : 5000;
         var CustomError = typeof options.CustomError === 'function' ? options.CustomError : _errors.RequestError;
         var requestId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
         return new Promise(function (resolve, reject) {
           var handleClose = function handleClose() {
-            _this5.requestCallbackMap.delete(requestId);
+            _this4.requestCallbackMap.delete(requestId);
 
             clearTimeout(timeout);
 
-            _this5.removeListener('close', handleClose);
+            _this4.removeListener('close', handleClose);
 
             reject(new _errors.ClientClosedError("Client closed before ".concat(type, " request completed")));
           };
 
           var timeout = setTimeout(function () {
-            _this5.requestCallbackMap.delete(requestId);
+            _this4.requestCallbackMap.delete(requestId);
 
-            _this5.removeListener('close', handleClose);
+            _this4.removeListener('close', handleClose);
 
             reject(new _errors.RequestTimeoutError("".concat(type, " requested timed out after ").concat(timeoutDuration, "ms")));
           }, timeoutDuration);
 
           var handleResponse = function handleResponse(success, code, text) {
-            _this5.requestCallbackMap.delete(requestId);
+            _this4.requestCallbackMap.delete(requestId);
 
             clearTimeout(timeout);
 
-            _this5.removeListener('close', handleClose);
+            _this4.removeListener('close', handleClose);
 
             if (success) {
               resolve({
@@ -756,11 +727,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(new CustomError(text, code));
           };
 
-          _this5.addListener('close', handleClose);
+          _this4.addListener('close', handleClose);
 
-          _this5.requestCallbackMap.set(requestId, handleResponse);
+          _this4.requestCallbackMap.set(requestId, handleResponse);
 
-          _this5.braidClient.publish(_this5.publishName, {
+          _this4.braidClient.publish(_this4.publishName, {
             requestId: requestId,
             type: type,
             value: value
@@ -788,64 +759,156 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "connectToPeer",
     value: function () {
-      var _connectToPeer = _asyncToGenerator(function* (_ref) {
-        var _this6 = this;
+      var _connectToPeer = _asyncToGenerator(function* (socket) {
+        var _this5 = this;
 
-        var userId = _ref.userId,
-            serverId = _ref.serverId,
-            socketId = _ref.socketId,
-            clientId = _ref.clientId,
-            socketHash = _ref.socketHash;
+        var userId = socket.userId,
+            serverId = socket.serverId,
+            socketId = socket.socketId,
+            clientId = socket.clientId,
+            socketHash = socket.socketHash;
+        var reconnectCount = this.peerReconnectMap.get(clientId) || 0;
+        var reconnectDelay = reconnectCount > 5 ? 30000 : 1000 * (reconnectCount * reconnectCount);
+
+        if (reconnectDelay > 0) {
+          this.logger.info("Delaying connect by ".concat(Math.round(reconnectDelay / 1000), " ").concat(reconnectDelay === 1000 ? 'second' : 'seconds', " on attempt ").concat(reconnectCount));
+          yield new Promise(function (resolve) {
+            var timeout = setTimeout(function () {
+              _this5.removeListener('close', handleClose);
+
+              _this5.removeListener('socketLeave', handleSocketLeave);
+
+              resolve();
+            }, reconnectDelay);
+
+            var handleClose = function handleClose() {
+              clearTimeout(timeout);
+
+              _this5.removeListener('close', handleClose);
+
+              _this5.removeListener('socketLeave', handleSocketLeave);
+
+              resolve();
+            };
+
+            var handleSocketLeave = function handleSocketLeave(_ref) {
+              var oldSocketHash = _ref.socketHash;
+
+              if (socketHash !== oldSocketHash) {
+                return;
+              }
+
+              clearTimeout(timeout);
+
+              _this5.removeListener('close', handleClose);
+
+              _this5.removeListener('socketLeave', handleSocketLeave);
+
+              resolve();
+            };
+
+            _this5.addListener('close', handleClose);
+
+            _this5.addListener('socketLeave', handleSocketLeave);
+          });
+
+          if (!this.socketMap.has(socketHash)) {
+            return;
+          }
+        }
+
         var existingPeer = this.peerMap.get(clientId);
         var options = Object.assign({}, {
           initiator: clientId > this.clientId
         }, this.peerOptions);
         var peer = existingPeer || new _simplePeer.default(options);
         this.peerMap.set(clientId, peer);
+        this.peerReconnectMap.set(clientId, reconnectCount + 1);
+        this.emit('peer', {
+          clientId: clientId,
+          peer: peer
+        });
 
-        if (peer.connected) {
-          peer.emit('peerReconnect');
+        var addPeerListeners = function addPeerListeners() {
+          _this5.peerReconnectMap.set(clientId, 0);
 
-          var handlePeerClose = function handlePeerClose() {
-            _this6.logger.info("Peer ".concat(socketHash, " disconnected"));
-
+          var cleanup = function cleanup() {
+            peer.removeListener('stream', handleStream);
             peer.removeListener('error', handlePeerError);
             peer.removeListener('close', handlePeerClose);
             peer.removeListener('peerReconnect', handlePeerReconnect);
+          };
 
-            _this6.emit('disconnect', {
+          var handleStream = function handleStream(stream) {
+            if (!_this5.sessionClientIds.has(clientId)) {
+              _this5.logger.error("Received an unexpected stream from non-session user ".concat(userId, " client ").concat(clientId));
+
+              stream.getTracks().forEach(function (track) {
+                track.stop();
+                track.dispatchEvent(new Event('stop'));
+              });
+              return;
+            }
+
+            _this5.emit('stream', {
+              stream: stream,
               userId: userId,
               serverId: serverId,
               socketId: socketId,
-              peer: peer
+              clientId: clientId
             });
           };
 
-          var handlePeerError = function handlePeerError(error) {
-            _this6.logger.error("Peer ".concat(socketHash, " error"));
+          var handlePeerClose = function handlePeerClose() {
+            _this5.logger.info("Disconnected from user ".concat(userId, " client ").concat(clientId));
 
-            _this6.logger.errorStack(error);
+            cleanup();
 
-            _this6.emit('peerError', {
-              error: error,
+            _this5.emit('disconnect', {
               userId: userId,
               serverId: serverId,
               socketId: socketId,
-              peer: peer
+              clientId: clientId
+            });
+
+            if (_this5.peerMap.has(clientId)) {
+              _this5.peerMap.delete(clientId);
+
+              _this5.connectToPeer(socket);
+
+              _this5.logger.warn("Reconnecting to user ".concat(userId, " client ").concat(clientId));
+            }
+          };
+
+          var handlePeerError = function handlePeerError(error) {
+            _this5.logger.error("Error in connection to user ".concat(userId, " client ").concat(clientId));
+
+            _this5.logger.errorStack(error);
+
+            _this5.emit('peerError', {
+              userId: userId,
+              serverId: serverId,
+              socketId: socketId,
+              clientId: clientId,
+              error: error
             });
           };
 
           var handlePeerReconnect = function handlePeerReconnect() {
-            _this6.logger.info("Peer ".concat(socketHash, " reconnected"));
+            _this5.logger.info("Reconnected to user ".concat(userId, " client ").concat(clientId));
 
-            peer.removeListener('error', handlePeerError);
-            peer.removeListener('close', handlePeerClose);
-            peer.removeListener('peerReconnect', handlePeerReconnect);
+            cleanup();
           };
 
+          peer.addListener('stream', handleStream);
           peer.addListener('close', handlePeerClose);
           peer.addListener('error', handlePeerError);
           peer.addListener('peerReconnect', handlePeerReconnect);
+        };
+
+        if (peer.connected) {
+          peer.emit('peerReconnect');
+          addPeerListeners();
           this.emit('connect', {
             userId: userId,
             clientId: clientId,
@@ -857,70 +920,28 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
 
         yield new Promise(function (resolve) {
-          var timeout = setTimeout(function () {
-            peer.removeListener('error', handleError);
+          var cleanup = function cleanup() {
+            clearTimeout(timeout);
+            peer.removeListener('error', handlePeerError);
+            peer.removeListener('close', handlePeerClose);
             peer.removeListener('connect', handleConnect);
             peer.removeListener('signal', handleSignal);
 
-            _this6.removeListener('close', handleClose);
+            _this5.removeListener('close', handleClose);
 
-            _this6.removeListener('socketLeave', handleSocketLeave);
+            _this5.removeListener('socketLeave', handleSocketLeave);
+          };
 
+          var timeout = setTimeout(function () {
+            cleanup();
             resolve();
           }, 5000);
 
           var handleConnect = function handleConnect() {
-            clearTimeout(timeout);
-            peer.removeListener('error', handleError);
-            peer.removeListener('connect', handleConnect);
-            peer.removeListener('signal', handleSignal);
+            cleanup();
+            addPeerListeners();
 
-            _this6.removeListener('close', handleClose);
-
-            _this6.removeListener('socketLeave', handleSocketLeave);
-
-            var handlePeerClose = function handlePeerClose() {
-              _this6.logger.info("Peer ".concat(socketHash, " disconnected"));
-
-              peer.removeListener('error', handlePeerError);
-              peer.removeListener('close', handlePeerClose);
-              peer.removeListener('peerReconnect', handlePeerReconnect);
-
-              _this6.emit('disconnect', {
-                userId: userId,
-                serverId: serverId,
-                socketId: socketId,
-                peer: peer
-              });
-            };
-
-            var handlePeerError = function handlePeerError(error) {
-              _this6.logger.error("Peer ".concat(socketHash, " error"));
-
-              _this6.logger.errorStack(error);
-
-              _this6.emit('peerError', {
-                error: error,
-                userId: userId,
-                serverId: serverId,
-                socketId: socketId,
-                peer: peer
-              });
-            };
-
-            var handlePeerReconnect = function handlePeerReconnect() {
-              _this6.logger.info("Peer ".concat(socketHash, " reconnected"));
-
-              peer.removeListener('error', handlePeerError);
-              peer.removeListener('close', handlePeerClose);
-              peer.removeListener('peerReconnect', handlePeerReconnect);
-            };
-
-            peer.addListener('close', handlePeerClose);
-            peer.addListener('error', handlePeerError);
-            peer.addListener('peerReconnect', handlePeerReconnect);
-
-            _this6.emit('connect', {
+            _this5.emit('connect', {
               userId: userId,
               clientId: clientId,
               serverId: serverId,
@@ -934,7 +955,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           var handleSignal = /*#__PURE__*/function () {
             var _ref2 = _asyncToGenerator(function* (data) {
               try {
-                yield _this6.publish(_constants.SIGNAL, {
+                yield _this5.publish(_constants.SIGNAL, {
                   serverId: serverId,
                   socketId: socketId,
                   data: data
@@ -942,9 +963,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
                   CustomError: _errors.SignalError
                 });
               } catch (error) {
-                _this6.logger.error("Unable to signal ".concat(socketHash));
+                _this5.logger.error("Unable to signal user ".concat(userId, " client ").concat(clientId, " closed"));
 
-                _this6.logger.errorStack(error);
+                _this5.logger.errorStack(error);
               }
             });
 
@@ -954,33 +975,42 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           }();
 
           var handleClose = function handleClose() {
-            clearTimeout(timeout);
-            peer.removeListener('error', handleError);
-            peer.removeListener('connect', handleConnect);
-            peer.removeListener('signal', handleSignal);
+            cleanup();
+            resolve();
+          };
 
-            _this6.removeListener('close', handleClose);
+          var handlePeerClose = function handlePeerClose() {
+            _this5.logger.info("Connection to user ".concat(userId, " client ").concat(clientId, " closed"));
 
-            _this6.removeListener('socketLeave', handleSocketLeave);
+            cleanup();
+
+            if (_this5.peerMap.has(clientId)) {
+              _this5.peerMap.delete(clientId);
+
+              _this5.connectToPeer(socket);
+
+              _this5.logger.warn("Reconnecting to user ".concat(userId, " client ").concat(clientId));
+            }
 
             resolve();
           };
 
-          var handleError = function handleError(error) {
-            clearTimeout(timeout);
-            peer.removeListener('error', handleError);
-            peer.removeListener('connect', handleConnect);
-            peer.removeListener('signal', handleSignal);
+          var handlePeerError = function handlePeerError(error) {
+            cleanup();
 
-            _this6.removeListener('close', handleClose);
+            _this5.logger.error("Error connecting to ".concat(userId));
 
-            _this6.removeListener('socketLeave', handleSocketLeave);
+            _this5.logger.errorStack(error);
 
-            _this6.logger.error("Error connecting to ".concat(userId));
+            _this5.emit('peerError', {
+              userId: userId,
+              serverId: serverId,
+              socketId: socketId,
+              clientId: clientId,
+              error: error
+            });
 
-            _this6.logger.errorStack(error);
-
-            _this6.emit('error', error);
+            _this5.emit('error', error);
 
             resolve();
           };
@@ -992,29 +1022,23 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return;
             }
 
-            clearTimeout(timeout);
-            peer.removeListener('error', handleError);
-            peer.removeListener('connect', handleConnect);
-            peer.removeListener('signal', handleSignal);
+            cleanup();
 
-            _this6.removeListener('close', handleClose);
-
-            _this6.removeListener('socketLeave', handleSocketLeave);
-
-            _this6.logger.warn("Unable to connect to ".concat(userId, ", socket closed before connection was completed"));
+            _this5.logger.warn("Unable to connect to user ".concat(userId, " client ").concat(clientId, ", socket closed before connection was completed"));
 
             resolve();
           };
 
-          peer.addListener('error', handleError);
+          peer.addListener('error', handlePeerError);
+          peer.addListener('close', handlePeerClose);
           peer.addListener('connect', handleConnect);
           peer.addListener('signal', handleSignal);
 
-          _this6.addListener('close', handleClose);
+          _this5.addListener('close', handleClose);
 
-          _this6.addListener('socketLeave', handleSocketLeave);
+          _this5.addListener('socketLeave', handleSocketLeave);
 
-          var signalQueue = _this6.signalQueueMap.get(clientId);
+          var signalQueue = _this5.signalQueueMap.get(clientId);
 
           if (Array.isArray(signalQueue)) {
             while (signalQueue.length > 0) {
@@ -1032,6 +1056,20 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       return connectToPeer;
     }()
   }, {
+    key: "sendStream",
+    value: function () {
+      var _sendStream = _asyncToGenerator(function* (clientId, stream) {
+        var peer = yield this.getConnectedPeer(clientId);
+        peer.addStream(stream);
+      });
+
+      function sendStream(_x5, _x6) {
+        return _sendStream.apply(this, arguments);
+      }
+
+      return sendStream;
+    }()
+  }, {
     key: "disconnectFromPeer",
     value: function () {
       var _disconnectFromPeer = _asyncToGenerator(function* (_ref4) {
@@ -1042,11 +1080,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           return;
         }
 
-        peer.destroy();
         this.peerMap.delete(clientId);
+        peer.destroy();
       });
 
-      function disconnectFromPeer(_x5) {
+      function disconnectFromPeer(_x7) {
         return _disconnectFromPeer.apply(this, arguments);
       }
 
@@ -1165,13 +1203,73 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       return this.startedSessionId === this.sessionId;
     }
   }, {
+    key: "inviteToSession",
+    value: function () {
+      var _inviteToSession = _asyncToGenerator(function* (userId, data, sessionJoinHandler) {
+        var queue = this.queueMap.get(_constants.SESSION_QUEUE);
+
+        if (typeof queue !== 'undefined') {
+          yield queue.onIdle();
+        }
+
+        var sessionId = this.sessionId;
+
+        if (sessionId === 'string') {
+          yield this.publish(_constants.INVITE_TO_SESSION, {
+            userId: userId,
+            sessionId: sessionId,
+            data: data
+          }, {
+            CustomError: _errors.InviteToSessionError
+          });
+          return;
+        } // $FlowFixMe
+
+
+        var newSessionId = globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
+
+        var automaticSessionJoinHandler = /*#__PURE__*/function () {
+          var _ref5 = _asyncToGenerator(function* (values) {
+            if (values.userId === userId) {
+              return [true, 200, 'Authorized'];
+            }
+
+            if (typeof sessionJoinHandler === 'function') {
+              return sessionJoinHandler(values);
+            }
+
+            return [true, 200, 'Authorized'];
+          });
+
+          return function automaticSessionJoinHandler(_x11) {
+            return _ref5.apply(this, arguments);
+          };
+        }();
+
+        yield this.startSession(newSessionId, automaticSessionJoinHandler);
+        yield this.publish(_constants.INVITE_TO_SESSION, {
+          userId: userId,
+          sessionId: newSessionId,
+          data: data
+        }, {
+          CustomError: _errors.InviteToSessionError
+        });
+      });
+
+      function inviteToSession(_x8, _x9, _x10) {
+        return _inviteToSession.apply(this, arguments);
+      }
+
+      return inviteToSession;
+    }()
+  }, {
     key: "startSession",
     value: function () {
       var _startSession = _asyncToGenerator(function* (sessionId, sessionJoinHandler) {
-        var _this7 = this;
+        var _this6 = this;
 
         yield this.addToQueue(_constants.SESSION_QUEUE, function () {
-          return _this7.publish(_constants.START_SESSION, {
+          return _this6.publish(_constants.START_SESSION, {
             sessionId: sessionId
           }, {
             CustomError: _errors.StartSessionError
@@ -1189,12 +1287,18 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function startSession(_x6, _x7) {
+      function startSession(_x12, _x13) {
         return _startSession.apply(this, arguments);
       }
 
       return startSession;
-    }()
+    }() //  addMedia(clientId: number, mediaStream: MediaStream) {
+    //    if(this.sessionClientIds.has(clientId)) {
+    //      throw new Error(`Unable to add media, client ${clientId} is not part of the active session`);
+    //    }
+    //
+    //  }
+
   }, {
     key: "didJoinSession",
     value: function didJoinSession() {
@@ -1208,11 +1312,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "joinSession",
     value: function () {
       var _joinSession = _asyncToGenerator(function* (sessionId) {
-        var _this8 = this;
+        var _this7 = this;
 
         var timeoutDuration = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 30000;
         yield this.addToQueue(_constants.SESSION_QUEUE, function () {
-          return _this8.publish(_constants.JOIN_SESSION, {
+          return _this7.publish(_constants.JOIN_SESSION, {
             sessionId: sessionId,
             timeoutDuration: timeoutDuration
           }, {
@@ -1223,7 +1327,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         this.joinedSessionId = sessionId;
       });
 
-      function joinSession(_x8) {
+      function joinSession(_x14) {
         return _joinSession.apply(this, arguments);
       }
 
@@ -1233,10 +1337,10 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "leaveSession",
     value: function () {
       var _leaveSession = _asyncToGenerator(function* () {
-        var _this9 = this;
+        var _this8 = this;
 
         yield this.addToQueue(_constants.SESSION_QUEUE, function () {
-          return _this9.publish(_constants.LEAVE_SESSION, {}, {
+          return _this8.publish(_constants.LEAVE_SESSION, {}, {
             CustomError: _errors.LeaveSessionError
           });
         });
@@ -1253,7 +1357,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "handleMessage",
     value: function () {
       var _handleMessage = _asyncToGenerator(function* (message) {
-        var _this10 = this;
+        var _this9 = this;
 
         if (_typeof(message) !== 'object') {
           this.logger.error('Invalid message format');
@@ -1436,7 +1540,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
               var abortController = new AbortController();
               abortController.signal.addEventListener('abort', function () {
-                _this10.sessionJoinRequestMap.delete(_requestHash);
+                _this9.sessionJoinRequestMap.delete(_requestHash);
               });
 
               var promise = _asyncToGenerator(function* () {
@@ -1449,19 +1553,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
                     abortSignal: abortController.signal
                   });
                 } catch (error) {
-                  _this10.logger.error("Unable to respond to session join request for user ".concat(_userId, " and session ").concat(_sessionId2, ", error in session join handler"));
+                  _this9.logger.error("Unable to respond to session join request for user ".concat(_userId, " and session ").concat(_sessionId2, ", error in session join handler"));
 
-                  _this10.logger.errorStack(error);
+                  _this9.logger.errorStack(error);
                 }
 
                 if (abortController.signal.aborted) {
-                  _this10.logger.warn("Session join request for user ".concat(_userId, " and session ").concat(_sessionId2, " was aborted"));
+                  _this9.logger.warn("Session join request for user ".concat(_userId, " and session ").concat(_sessionId2, " was aborted"));
 
                   return;
                 }
 
                 try {
-                  yield _this10.publish(_constants.SESSION_JOIN_RESPONSE, {
+                  yield _this9.publish(_constants.SESSION_JOIN_RESPONSE, {
                     userId: _userId,
                     sessionId: _sessionId2,
                     success: response[0],
@@ -1471,12 +1575,12 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
                     CustomError: _errors.SessionJoinResponseError
                   });
                 } catch (error) {
-                  _this10.logger.error("Unable to send session join request for user ".concat(_userId, " and session ").concat(_sessionId2));
+                  _this9.logger.error("Unable to send session join request for user ".concat(_userId, " and session ").concat(_sessionId2));
 
-                  _this10.logger.errorStack(error);
+                  _this9.logger.errorStack(error);
                 }
 
-                _this10.sessionJoinRequestMap.delete(_requestHash);
+                _this9.sessionJoinRequestMap.delete(_requestHash);
               })();
 
               this.sessionJoinRequestMap.set(_requestHash, [promise, abortController]);
@@ -1493,11 +1597,101 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function handleMessage(_x9) {
+      function handleMessage(_x15) {
         return _handleMessage.apply(this, arguments);
       }
 
       return handleMessage;
+    }()
+  }, {
+    key: "getConnectedPeer",
+    value: function () {
+      var _getConnectedPeer = _asyncToGenerator(function* (clientId) {
+        var _this10 = this;
+
+        var peer = this.peerMap.get(clientId);
+
+        if (typeof peer !== 'undefined' && peer.connected) {
+          return peer;
+        }
+
+        return new Promise(function (resolve, reject) {
+          var _peer; // eslint-disable-line no-underscore-dangle
+
+
+          var cleanup = function cleanup() {
+            _this10.removeListener('sessionClientLeave', handleSessionClientLeave);
+
+            _this10.removeListener('connect', handleConnect);
+
+            _this10.removeListener('peer', handlePeer);
+
+            if (typeof _peer !== 'undefined') {
+              _peer.removeListener('close', handlePeerClose);
+
+              _peer.removeListener('error', handlePeerError);
+            }
+          };
+
+          var handlePeerClose = function handlePeerClose() {
+            cleanup();
+            reject(new Error("Peer ".concat(clientId, " closed before connection was established")));
+          };
+
+          var handlePeerError = function handlePeerError(error) {
+            cleanup();
+            reject(error);
+          };
+
+          var handlePeer = function handlePeer(_ref7) {
+            var newClientId = _ref7.clientId,
+                _p = _ref7.peer;
+
+            if (newClientId !== clientId) {
+              return;
+            }
+
+            _peer = _p;
+
+            _p.addListener('close', handlePeerClose);
+
+            _p.addListener('error', handlePeerError);
+          };
+
+          var handleConnect = function handleConnect(_ref8) {
+            var newClientId = _ref8.clientId,
+                _p = _ref8.peer;
+
+            if (newClientId !== clientId) {
+              return;
+            }
+
+            cleanup();
+            resolve(_p);
+          };
+
+          var handleSessionClientLeave = function handleSessionClientLeave(oldClientId) {
+            if (clientId !== oldClientId) {
+              return;
+            }
+
+            cleanup();
+            reject(new Error("Client ".concat(clientId, " left before connection was established")));
+          };
+
+          _this10.addListener('sessionClientLeave', handleSessionClientLeave);
+
+          _this10.addListener('connect', handleConnect);
+
+          _this10.addListener('peer', handlePeer);
+        });
+      });
+
+      function getConnectedPeer(_x16) {
+        return _getConnectedPeer.apply(this, arguments);
+      }
+
+      return getConnectedPeer;
     }()
   }, {
     key: "handleSessionClientJoin",
@@ -1576,8 +1770,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (!this.isConnectedToClient(clientId)) {
           yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref6) {
-              var newClientId = _ref6.clientId;
+            var handleConnect = function handleConnect(_ref9) {
+              var newClientId = _ref9.clientId;
 
               if (newClientId !== clientId) {
                 return;
@@ -1623,7 +1817,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         handleDataPublish(this.data.dump());
       });
 
-      function handleSessionClientJoin(_x10) {
+      function handleSessionClientJoin(_x17) {
         return _handleSessionClientJoin.apply(this, arguments);
       }
 
