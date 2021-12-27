@@ -730,10 +730,6 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         var _this4 = this;
 
         var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
-        console.log('PUBLISH', {
-          type: type,
-          value: value
-        });
         yield this._ready; // eslint-disable-line no-underscore-dangle
 
         var timeoutDuration = typeof options.timeoutDuration === 'number' ? options.timeoutDuration : 5000;
@@ -1489,8 +1485,6 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     value: function () {
       var _handleMessage = _asyncToGenerator(function* (message) {
         var _this10 = this;
-
-        console.log(JSON.stringify(message, null, 2));
 
         if (_typeof(message) !== 'object') {
           this.logger.error('Invalid message format');

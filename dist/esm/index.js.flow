@@ -428,9 +428,6 @@ export class Bond extends EventEmitter {
   }
 
   async publish(type:string, value:Object, options?: { timeoutDuration?: number, CustomError?: Class<RequestError> } = {}):Promise<{ text:string, code:number }> {
-    console.log('PUBLISH', {
-      type, value,
-    });
     await this._ready; // eslint-disable-line no-underscore-dangle
     const timeoutDuration = typeof options.timeoutDuration === 'number' ? options.timeoutDuration : 5000;
     const CustomError = typeof options.CustomError === 'function' ? options.CustomError : RequestError;
@@ -813,7 +810,6 @@ export class Bond extends EventEmitter {
   }
 
   async handleMessage(message:{ requestId?: number, type:string, value:Object }) {
-    console.log(JSON.stringify(message, null, 2));
     if (typeof message !== 'object') {
       this.logger.error('Invalid message format');
       this.logger.error(JSON.stringify(message));
