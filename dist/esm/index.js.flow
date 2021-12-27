@@ -123,7 +123,7 @@ export class Bond extends EventEmitter {
   declare sessionJoinRequestMap: Map<string, [Promise<void>, AbortController]>;
   declare data: ObservedRemoveMap<string | number, any>;
   declare sessionClientOffsetMap: Map<number, number>;
-
+  declare leaveSessionAfterLastClientTimeout: void | TimeoutID;
 
   constructor(braidClient: BraidClient, roomId:string, userId:string, options?: Options = {}) {
     super();
@@ -321,6 +321,37 @@ export class Bond extends EventEmitter {
       this.braidClient.addListener('close', handleClose);
       this.braidClient.addListener('error', handleError);
     });
+
+    this.addListener('sessionClientJoin', () => {
+      const sessionClientIds = this.sessionClientIds;
+      if (sessionClientIds.size > 1) {
+        return;
+      }
+      clearTimeout(this.leaveSessionAfterLastClientTimeout);
+    });
+    this.addListener('sessionClientLeave', async () => {
+      const sessionClientIds = this.sessionClientIds;
+      if (sessionClientIds.size > 1) {
+        return;
+      }
+      if (sessionClientIds.size === 0) {
+        try {
+          await this.leaveSession();
+        } catch (error) {
+          this.logger.error('Unable to leave session after last session closed');
+          this.logger.errorStack(error);
+        }
+        return;
+      }
+      this.leaveSessionAfterLastClientTimeout = setTimeout(async () => {
+        try {
+          await this.leaveSession();
+        } catch (error) {
+          this.logger.error('Unable to leave session after last session closed');
+          this.logger.errorStack(error);
+        }
+      }, 5000);
+    });
   }
 
   get sessionClientIds():Set<number> {
@@ -397,6 +428,9 @@ export class Bond extends EventEmitter {
   }
 
   async publish(type:string, value:Object, options?: { timeoutDuration?: number, CustomError?: Class<RequestError> } = {}):Promise<{ text:string, code:number }> {
+    console.log('PUBLISH', {
+      type, value,
+    });
     await this._ready; // eslint-disable-line no-underscore-dangle
     const timeoutDuration = typeof options.timeoutDuration === 'number' ? options.timeoutDuration : 5000;
     const CustomError = typeof options.CustomError === 'function' ? options.CustomError : RequestError;
@@ -637,6 +671,7 @@ export class Bond extends EventEmitter {
     }
     const oldSessionClientIds = this.sessionClientIds;
     this.sessionId = newSessionId;
+    this.emit('session', newSessionId || false);
     const newSessionClientIds = this.sessionClientIds;
     for (const clientId of oldSessionClientIds) {
       if (clientId === this.clientId) {
@@ -707,9 +742,6 @@ export class Bond extends EventEmitter {
         try {
           await this.leaveSession();
         } catch (error) {
-          if (error instanceof ClientClosedError) {
-            return;
-          }
           this.logger.error('Unable to leave session after invite timeout');
           this.logger.errorStack(error);
         }
@@ -769,11 +801,19 @@ export class Bond extends EventEmitter {
   }
 
   async leaveSession() {
-    await this.addToQueue(SESSION_QUEUE, () => this.publish(LEAVE_SESSION, {}, { CustomError: LeaveSessionError }));
-    this.cleanupSession();
+    try {
+      await this.addToQueue(SESSION_QUEUE, () => this.publish(LEAVE_SESSION, {}, { CustomError: LeaveSessionError }));
+      this.cleanupSession();
+    } catch (error) {
+      if (error instanceof ClientClosedError) {
+        return;
+      }
+      throw error;
+    }
   }
 
   async handleMessage(message:{ requestId?: number, type:string, value:Object }) {
+    console.log(JSON.stringify(message, null, 2));
     if (typeof message !== 'object') {
       this.logger.error('Invalid message format');
       this.logger.error(JSON.stringify(message));
@@ -1124,8 +1164,13 @@ export class Bond extends EventEmitter {
     handleDataPublish(this.data.dump());
   }
 
+  declineInviteToSession(data: Object) {
+    return this.publish(DECLINE_INVITE_TO_SESSION, data, { CustomError: DeclineInviteToSessionError });
+  }
+
   close() {
     this.active = false;
+    clearTimeout(this.leaveSessionAfterLastClientTimeout);
     const oldSessionClientIds = this.sessionClientIds;
     const oldSocketData = [...this.socketMap.values()];
     const oldUserIds = [...this.userIds];
