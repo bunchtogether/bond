@@ -65,6 +65,8 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
 
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
 function _createForOfIteratorHelper(o, allowArrayLike) { var it = typeof Symbol !== "undefined" && o[Symbol.iterator] || o["@@iterator"]; if (!it) { if (Array.isArray(o) || (it = _unsupportedIterableToArray(o)) || allowArrayLike && o && typeof o.length === "number") { if (it) o = it; var i = 0; var F = function F() {}; return { s: F, n: function n() { if (i >= o.length) return { done: true }; return { done: false, value: o[i++] }; }, e: function e(_e2) { throw _e2; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var normalCompletion = true, didErr = false, err; return { s: function s() { it = it.call(o); }, n: function n() { var step = it.next(); normalCompletion = step.done; return step; }, e: function e(_e3) { didErr = true; err = _e3; }, f: function f() { try { if (!normalCompletion && it.return != null) it.return(); } finally { if (didErr) throw err; } } }; }
 
 function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
@@ -155,6 +157,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     _this.peerReconnectMap = new Map();
     _this.queueMap = new Map();
     _this.sessionMap = new Map();
+    _this.inviteDeclineHandlerMap = new Map();
     _this.requestCallbackMap = new Map();
     _this.signalQueueMap = new Map();
     _this.peerDisconnectTimeoutMap = new Map();
@@ -612,6 +615,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             if (typeof value === 'undefined') {
               return;
             }
+
+            console.log(JSON.stringify(value, null, 2));
 
             _this2.removeListener('close', handleClose);
 
@@ -1205,16 +1210,25 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "inviteToSession",
     value: function () {
-      var _inviteToSession = _asyncToGenerator(function* (userId, data, sessionJoinHandler) {
+      var _inviteToSession = _asyncToGenerator(function* (userId) {
+        var _this6 = this;
+
+        var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+        var data = options.data,
+            _options$timeoutDurat = options.timeoutDuration,
+            timeoutDuration = _options$timeoutDurat === void 0 ? 30000 : _options$timeoutDurat,
+            sessionJoinHandler = options.sessionJoinHandler;
         var queue = this.queueMap.get(_constants.SESSION_QUEUE);
 
         if (typeof queue !== 'undefined') {
           yield queue.onIdle();
         }
 
-        var sessionId = this.sessionId;
+        var hasSessionId = this.sessionId === 'string'; // $FlowFixMe
 
-        if (sessionId === 'string') {
+        var sessionId = this.sessionId || globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
+
+        if (hasSessionId) {
           yield this.publish(_constants.INVITE_TO_SESSION, {
             userId: userId,
             sessionId: sessionId,
@@ -1222,41 +1236,115 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           }, {
             CustomError: _errors.InviteToSessionError
           });
-          return;
-        } // $FlowFixMe
+        } else {
+          var automaticSessionJoinHandler = /*#__PURE__*/function () {
+            var _ref5 = _asyncToGenerator(function* (values) {
+              if (values.userId === userId) {
+                return [true, 200, 'Authorized'];
+              }
 
+              if (typeof sessionJoinHandler === 'function') {
+                return sessionJoinHandler(values);
+              }
 
-        var newSessionId = globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
-
-        var automaticSessionJoinHandler = /*#__PURE__*/function () {
-          var _ref5 = _asyncToGenerator(function* (values) {
-            if (values.userId === userId) {
               return [true, 200, 'Authorized'];
-            }
+            });
 
-            if (typeof sessionJoinHandler === 'function') {
-              return sessionJoinHandler(values);
-            }
+            return function automaticSessionJoinHandler(_x9) {
+              return _ref5.apply(this, arguments);
+            };
+          }();
 
-            return [true, 200, 'Authorized'];
+          yield this.startSession(sessionId, automaticSessionJoinHandler);
+          yield this.publish(_constants.INVITE_TO_SESSION, {
+            userId: userId,
+            sessionId: sessionId,
+            data: data
+          }, {
+            CustomError: _errors.InviteToSessionError
           });
+        }
 
-          return function automaticSessionJoinHandler(_x11) {
-            return _ref5.apply(this, arguments);
+        yield new Promise(function (resolve, reject) {
+          var cleanup = function cleanup() {
+            clearTimeout(timeout);
+
+            _this6.removeListener('sessionJoin', handleSessionJoin);
+
+            _this6.removeListener('close', handleClose);
+
+            _this6.inviteDeclineHandlerMap.delete("".concat(userId, ":").concat(sessionId));
           };
-        }();
 
-        yield this.startSession(newSessionId, automaticSessionJoinHandler);
-        yield this.publish(_constants.INVITE_TO_SESSION, {
-          userId: userId,
-          sessionId: newSessionId,
-          data: data
-        }, {
-          CustomError: _errors.InviteToSessionError
+          var leaveSession = /*#__PURE__*/function () {
+            var _ref6 = _asyncToGenerator(function* () {
+              if (hasSessionId) {
+                return;
+              }
+
+              try {
+                yield _this6.leaveSession();
+              } catch (error) {
+                if (error instanceof _errors.ClientClosedError) {
+                  return;
+                }
+
+                _this6.logger.error('Unable to leave session after invite timeout');
+
+                _this6.logger.errorStack(error);
+              }
+            });
+
+            return function leaveSession() {
+              return _ref6.apply(this, arguments);
+            };
+          }();
+
+          var timeout = setTimeout( /*#__PURE__*/_asyncToGenerator(function* () {
+            cleanup();
+            yield leaveSession();
+            reject(new _errors.InvitationTimeoutError("Invitation timed out after ".concat(Math.round(timeoutDuration / 100) / 10, " seconds")));
+          }), timeoutDuration);
+
+          var handleSessionJoin = function handleSessionJoin(socket) {
+            if (socket.sessionId !== sessionId) {
+              return;
+            }
+
+            if (socket.userId !== userId) {
+              return;
+            }
+
+            cleanup();
+            resolve();
+          };
+
+          var handleClose = function handleClose() {
+            cleanup();
+            reject(new _errors.ClientClosedError('Closed before invite'));
+          };
+
+          var handleDecline = /*#__PURE__*/function () {
+            var _ref8 = _asyncToGenerator(function* () {
+              cleanup();
+              yield leaveSession();
+              reject(new _errors.InvitationDeclinedError('Invitation declined'));
+            });
+
+            return function handleDecline() {
+              return _ref8.apply(this, arguments);
+            };
+          }();
+
+          _this6.inviteDeclineHandlerMap.set("".concat(userId, ":").concat(sessionId || ''), handleDecline);
+
+          _this6.addListener('sessionJoin', handleSessionJoin);
+
+          _this6.addListener('close', handleClose);
         });
       });
 
-      function inviteToSession(_x8, _x9, _x10) {
+      function inviteToSession(_x8) {
         return _inviteToSession.apply(this, arguments);
       }
 
@@ -1266,10 +1354,10 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "startSession",
     value: function () {
       var _startSession = _asyncToGenerator(function* (sessionId, sessionJoinHandler) {
-        var _this6 = this;
+        var _this7 = this;
 
         yield this.addToQueue(_constants.SESSION_QUEUE, function () {
-          return _this6.publish(_constants.START_SESSION, {
+          return _this7.publish(_constants.START_SESSION, {
             sessionId: sessionId
           }, {
             CustomError: _errors.StartSessionError
@@ -1287,18 +1375,12 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function startSession(_x12, _x13) {
+      function startSession(_x10, _x11) {
         return _startSession.apply(this, arguments);
       }
 
       return startSession;
-    }() //  addMedia(clientId: number, mediaStream: MediaStream) {
-    //    if(this.sessionClientIds.has(clientId)) {
-    //      throw new Error(`Unable to add media, client ${clientId} is not part of the active session`);
-    //    }
-    //
-    //  }
-
+    }()
   }, {
     key: "didJoinSession",
     value: function didJoinSession() {
@@ -1312,11 +1394,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "joinSession",
     value: function () {
       var _joinSession = _asyncToGenerator(function* (sessionId) {
-        var _this7 = this;
+        var _this8 = this;
 
         var timeoutDuration = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 30000;
         yield this.addToQueue(_constants.SESSION_QUEUE, function () {
-          return _this7.publish(_constants.JOIN_SESSION, {
+          return _this8.publish(_constants.JOIN_SESSION, {
             sessionId: sessionId,
             timeoutDuration: timeoutDuration
           }, {
@@ -1327,7 +1409,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         this.joinedSessionId = sessionId;
       });
 
-      function joinSession(_x14) {
+      function joinSession(_x12) {
         return _joinSession.apply(this, arguments);
       }
 
@@ -1337,10 +1419,10 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "leaveSession",
     value: function () {
       var _leaveSession = _asyncToGenerator(function* () {
-        var _this8 = this;
+        var _this9 = this;
 
         yield this.addToQueue(_constants.SESSION_QUEUE, function () {
-          return _this8.publish(_constants.LEAVE_SESSION, {}, {
+          return _this9.publish(_constants.LEAVE_SESSION, {}, {
             CustomError: _errors.LeaveSessionError
           });
         });
@@ -1357,7 +1439,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "handleMessage",
     value: function () {
       var _handleMessage = _asyncToGenerator(function* (message) {
-        var _this9 = this;
+        var _this10 = this;
 
         if (_typeof(message) !== 'object') {
           this.logger.error('Invalid message format');
@@ -1470,32 +1552,63 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
             break;
 
-          case _constants.ABORT_SESSION_JOIN_REQUEST:
+          case _constants.DECLINE_INVITE_TO_SESSION:
             try {
               var userId = value.userId,
                   sessionId = value.sessionId;
 
               if (typeof userId !== 'string') {
-                this.logger.error('Abort session join request contained an invalid user ID');
+                this.logger.error('Decline invite request contained an invalid user ID');
                 this.logger.error(JSON.stringify(message));
                 return;
               }
 
               if (typeof sessionId !== 'string') {
-                this.logger.error('Abort session join request contained an invalid session ID');
+                this.logger.error('Decline invite request contained an invalid session ID');
                 this.logger.error(JSON.stringify(message));
                 return;
               }
 
               var requestHash = "".concat(userId, ":").concat(sessionId);
-              var existing = this.sessionJoinRequestMap.get(requestHash);
+              var inviteDeclineHandler = this.inviteDeclineHandlerMap.get(requestHash);
 
-              if (!Array.isArray(existing)) {
-                this.logger.warn("Unable to abort session join request for user ".concat(userId, " and session ").concat(sessionId, ", request does not exist"));
+              if (typeof inviteDeclineHandler === 'function') {
+                inviteDeclineHandler();
+              }
+            } catch (error) {
+              this.logger.error('Unable to process decline invite request');
+              this.logger.errorStack(error);
+            }
+
+            break;
+
+          case _constants.ABORT_SESSION_JOIN_REQUEST:
+            try {
+              var _userId = value.userId,
+                  _sessionId2 = value.sessionId;
+
+              if (typeof _userId !== 'string') {
+                this.logger.error('Abort session join request contained an invalid user ID');
+                this.logger.error(JSON.stringify(message));
                 return;
               }
 
-              this.logger.warn("Aborting session join request for user ".concat(userId, " and session ").concat(sessionId));
+              if (typeof _sessionId2 !== 'string') {
+                this.logger.error('Abort session join request contained an invalid session ID');
+                this.logger.error(JSON.stringify(message));
+                return;
+              }
+
+              var _requestHash = "".concat(_userId, ":").concat(_sessionId2);
+
+              var existing = this.sessionJoinRequestMap.get(_requestHash);
+
+              if (!Array.isArray(existing)) {
+                this.logger.warn("Unable to abort session join request for user ".concat(_userId, " and session ").concat(_sessionId2, ", request does not exist"));
+                return;
+              }
+
+              this.logger.warn("Aborting session join request for user ".concat(_userId, " and session ").concat(_sessionId2));
               existing[1].abort();
             } catch (error) {
               this.logger.error('Unable to process session abort join request');
@@ -1506,41 +1619,41 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
           case _constants.SESSION_JOIN_REQUEST:
             try {
-              var _userId = value.userId,
-                  _sessionId2 = value.sessionId;
+              var _userId2 = value.userId,
+                  _sessionId3 = value.sessionId;
 
-              if (typeof _userId !== 'string') {
+              if (typeof _userId2 !== 'string') {
                 this.logger.error('Session join request contained an invalid user ID');
                 this.logger.error(JSON.stringify(message));
                 return;
               }
 
-              if (typeof _sessionId2 !== 'string') {
+              if (typeof _sessionId3 !== 'string') {
                 this.logger.error('Session join request contained an invalid session ID');
                 this.logger.error(JSON.stringify(message));
                 return;
               }
 
-              var _requestHash = "".concat(_userId, ":").concat(_sessionId2);
+              var _requestHash2 = "".concat(_userId2, ":").concat(_sessionId3);
 
-              var _existing = this.sessionJoinRequestMap.get(_requestHash);
+              var _existing = this.sessionJoinRequestMap.get(_requestHash2);
 
               if (Array.isArray(_existing)) {
-                this.logger.warn("Session join request for user ".concat(_userId, " and session ").concat(_sessionId2, " already exists"));
+                this.logger.warn("Session join request for user ".concat(_userId2, " and session ").concat(_sessionId3, " already exists"));
                 yield _existing[0];
                 return;
               }
 
-              var sessionJoinHandler = this.sessionJoinHandlerMap.get(_sessionId2);
+              var sessionJoinHandler = this.sessionJoinHandlerMap.get(_sessionId3);
 
               if (typeof sessionJoinHandler !== 'function') {
-                this.logger.error("Handler for session ".concat(_sessionId2, " does not exist"));
+                this.logger.error("Handler for session ".concat(_sessionId3, " does not exist"));
                 return;
               }
 
               var abortController = new AbortController();
               abortController.signal.addEventListener('abort', function () {
-                _this9.sessionJoinRequestMap.delete(_requestHash);
+                _this10.sessionJoinRequestMap.delete(_requestHash2);
               });
 
               var promise = _asyncToGenerator(function* () {
@@ -1548,26 +1661,26 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
                 try {
                   response = yield sessionJoinHandler({
-                    userId: _userId,
-                    sessionId: _sessionId2,
+                    userId: _userId2,
+                    sessionId: _sessionId3,
                     abortSignal: abortController.signal
                   });
                 } catch (error) {
-                  _this9.logger.error("Unable to respond to session join request for user ".concat(_userId, " and session ").concat(_sessionId2, ", error in session join handler"));
+                  _this10.logger.error("Unable to respond to session join request for user ".concat(_userId2, " and session ").concat(_sessionId3, ", error in session join handler"));
 
-                  _this9.logger.errorStack(error);
+                  _this10.logger.errorStack(error);
                 }
 
                 if (abortController.signal.aborted) {
-                  _this9.logger.warn("Session join request for user ".concat(_userId, " and session ").concat(_sessionId2, " was aborted"));
+                  _this10.logger.warn("Session join request for user ".concat(_userId2, " and session ").concat(_sessionId3, " was aborted"));
 
                   return;
                 }
 
                 try {
-                  yield _this9.publish(_constants.SESSION_JOIN_RESPONSE, {
-                    userId: _userId,
-                    sessionId: _sessionId2,
+                  yield _this10.publish(_constants.SESSION_JOIN_RESPONSE, {
+                    userId: _userId2,
+                    sessionId: _sessionId3,
                     success: response[0],
                     code: response[1],
                     text: response[2]
@@ -1575,15 +1688,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
                     CustomError: _errors.SessionJoinResponseError
                   });
                 } catch (error) {
-                  _this9.logger.error("Unable to send session join request for user ".concat(_userId, " and session ").concat(_sessionId2));
+                  _this10.logger.error("Unable to send session join response for user ".concat(_userId2, " and session ").concat(_sessionId3));
 
-                  _this9.logger.errorStack(error);
+                  _this10.logger.errorStack(error);
                 }
 
-                _this9.sessionJoinRequestMap.delete(_requestHash);
+                _this10.sessionJoinRequestMap.delete(_requestHash2);
               })();
 
-              this.sessionJoinRequestMap.set(_requestHash, [promise, abortController]);
+              this.sessionJoinRequestMap.set(_requestHash2, [promise, abortController]);
               yield promise;
             } catch (error) {
               this.logger.error('Unable to process session join request');
@@ -1597,7 +1710,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function handleMessage(_x15) {
+      function handleMessage(_x13) {
         return _handleMessage.apply(this, arguments);
       }
 
@@ -1607,7 +1720,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "getConnectedPeer",
     value: function () {
       var _getConnectedPeer = _asyncToGenerator(function* (clientId) {
-        var _this10 = this;
+        var _this11 = this;
 
         var peer = this.peerMap.get(clientId);
 
@@ -1620,11 +1733,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
 
           var cleanup = function cleanup() {
-            _this10.removeListener('sessionClientLeave', handleSessionClientLeave);
+            _this11.removeListener('sessionClientLeave', handleSessionClientLeave);
 
-            _this10.removeListener('connect', handleConnect);
+            _this11.removeListener('connect', handleConnect);
 
-            _this10.removeListener('peer', handlePeer);
+            _this11.removeListener('peer', handlePeer);
 
             if (typeof _peer !== 'undefined') {
               _peer.removeListener('close', handlePeerClose);
@@ -1643,9 +1756,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref7) {
-            var newClientId = _ref7.clientId,
-                _p = _ref7.peer;
+          var handlePeer = function handlePeer(_ref10) {
+            var newClientId = _ref10.clientId,
+                _p = _ref10.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -1658,9 +1771,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref8) {
-            var newClientId = _ref8.clientId,
-                _p = _ref8.peer;
+          var handleConnect = function handleConnect(_ref11) {
+            var newClientId = _ref11.clientId,
+                _p = _ref11.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -1679,15 +1792,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(new Error("Client ".concat(clientId, " left before connection was established")));
           };
 
-          _this10.addListener('sessionClientLeave', handleSessionClientLeave);
+          _this11.addListener('sessionClientLeave', handleSessionClientLeave);
 
-          _this10.addListener('connect', handleConnect);
+          _this11.addListener('connect', handleConnect);
 
-          _this10.addListener('peer', handlePeer);
+          _this11.addListener('peer', handlePeer);
         });
       });
 
-      function getConnectedPeer(_x16) {
+      function getConnectedPeer(_x14) {
         return _getConnectedPeer.apply(this, arguments);
       }
 
@@ -1697,7 +1810,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "handleSessionClientJoin",
     value: function () {
       var _handleSessionClientJoin = _asyncToGenerator(function* (clientId) {
-        var _this11 = this;
+        var _this12 = this;
 
         var interval;
 
@@ -1711,7 +1824,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         var cleanup = function cleanup() {
           abortController.abort();
 
-          _this11.removeListener('sessionClientLeave', handleSessionClientLeave);
+          _this12.removeListener('sessionClientLeave', handleSessionClientLeave);
 
           if (typeof _peer !== 'undefined') {
             _peer.removeListener('close', handlePeerClose);
@@ -1719,7 +1832,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _peer.removeListener('data', handlePeerData);
           }
 
-          _this11.data.removeListener('publish', handleDataPublish);
+          _this12.data.removeListener('publish', handleDataPublish);
 
           clearInterval(interval);
         };
@@ -1727,8 +1840,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         var handlePeerClose = function handlePeerClose() {
           cleanup();
 
-          if (_this11.sessionClientIds.has(clientId)) {
-            _this11.handleSessionClientJoin(clientId);
+          if (_this12.sessionClientIds.has(clientId)) {
+            _this12.handleSessionClientJoin(clientId);
           }
         };
 
@@ -1760,9 +1873,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           } else if (message instanceof _messagepack.Pong) {
             offset = Date.now() - message.wallclock - (performance.now() - message.timestamp) / 2;
 
-            _this11.sessionClientOffsetMap.set(clientId, offset);
+            _this12.sessionClientOffsetMap.set(clientId, offset);
           } else if (message instanceof _messagepack.ObservedRemoveDump) {
-            _this11.data.process(message.queue);
+            _this12.data.process(message.queue);
           }
         };
 
@@ -1770,27 +1883,27 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (!this.isConnectedToClient(clientId)) {
           yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref9) {
-              var newClientId = _ref9.clientId;
+            var handleConnect = function handleConnect(_ref12) {
+              var newClientId = _ref12.clientId;
 
               if (newClientId !== clientId) {
                 return;
               }
 
-              _this11.removeListener('connect', handleConnect);
+              _this12.removeListener('connect', handleConnect);
 
               abortSignal.removeEventListener('abort', handleAbort);
               resolve();
             };
 
             var handleAbort = function handleAbort() {
-              _this11.removeListener('connect', handleConnect);
+              _this12.removeListener('connect', handleConnect);
 
               abortSignal.removeEventListener('abort', handleAbort);
               resolve();
             };
 
-            _this11.addListener('connect', handleConnect);
+            _this12.addListener('connect', handleConnect);
 
             abortSignal.addEventListener('abort', handleAbort);
           });
@@ -1817,7 +1930,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         handleDataPublish(this.data.dump());
       });
 
-      function handleSessionClientJoin(_x17) {
+      function handleSessionClientJoin(_x15) {
         return _handleSessionClientJoin.apply(this, arguments);
       }
 
@@ -1904,4 +2017,85 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 }(_events.default);
 
 exports.Bond = Bond;
+
+_defineProperty(Bond, "declineInviteToSession", void 0);
+
+var publish = function publish(braidClient, abortSignal, roomId, type, value) {
+  var options = arguments.length > 5 && arguments[5] !== undefined ? arguments[5] : {};
+  var name = "signal/".concat(roomId);
+  var publishName = "signal/".concat(roomId, "/").concat(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(36));
+  var timeoutDuration = typeof options.timeoutDuration === 'number' ? options.timeoutDuration : 5000;
+  var CustomError = typeof options.CustomError === 'function' ? options.CustomError : _errors.RequestError;
+  var requestId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+  return new Promise(function (resolve, reject) {
+    var cleanup = function cleanup() {
+      clearTimeout(timeout);
+      abortSignal.removeEventListener('abort', handleAbort);
+      braidClient.removeServerEventListener(name);
+      braidClient.stopPublishing(publishName);
+    };
+
+    var handleAbort = function handleAbort() {
+      cleanup();
+      reject(new _errors.AbortError("Publish request aborted before ".concat(type, " request completed")));
+    };
+
+    var timeout = setTimeout(function () {
+      cleanup();
+      reject(new _errors.RequestTimeoutError("".concat(type, " requested timed out after ").concat(timeoutDuration, "ms")));
+    }, timeoutDuration);
+
+    var handleMessage = function handleMessage(message) {
+      if (_typeof(message) !== 'object') {
+        return;
+      }
+
+      var responseId = message.requestId,
+          responseType = message.type,
+          responseValue = message.value;
+
+      if (responseType !== _constants.RESPONSE) {
+        return;
+      }
+
+      if (responseId !== requestId) {
+        return;
+      }
+
+      var success = responseValue.success,
+          code = responseValue.code,
+          text = responseValue.text;
+      cleanup();
+
+      if (success) {
+        resolve({
+          code: code,
+          text: text
+        });
+        return;
+      }
+
+      reject(new CustomError(text, code));
+    };
+
+    abortSignal.addEventListener('abort', handleAbort);
+    Promise.all([braidClient.startPublishing(publishName), braidClient.addServerEventListener(name, handleMessage)]).then(function () {
+      braidClient.publish(publishName, {
+        requestId: requestId,
+        type: type,
+        value: value
+      });
+    }).catch(function (error) {
+      cleanup();
+      reject(error);
+    });
+  });
+};
+
+Bond.declineInviteToSession = function (braidClient, abortSignal, data) {
+  var roomId = data.roomId;
+  return publish(braidClient, abortSignal, roomId, _constants.DECLINE_INVITE_TO_SESSION, data, {
+    CustomError: _errors.DeclineInviteToSessionError
+  });
+};
 //# sourceMappingURL=index.js.map

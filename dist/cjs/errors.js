@@ -5,7 +5,7 @@ function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" =
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.LeaveSessionError = exports.JoinSessionError = exports.InviteToSessionError = exports.ClientClosedError = void 0;
+exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.LeaveSessionError = exports.JoinSessionError = exports.InviteToSessionError = exports.InvitationTimeoutError = exports.InvitationDeclinedError = exports.DeclineInviteToSessionError = exports.ClientClosedError = exports.AbortError = void 0;
 
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
@@ -33,19 +33,40 @@ function _setPrototypeOf(o, p) { _setPrototypeOf = Object.setPrototypeOf || func
 
 function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
 
-var RequestTimeoutError = /*#__PURE__*/function (_Error) {
-  _inherits(RequestTimeoutError, _Error);
+// $FlowFixMe
+var AbortError = /*#__PURE__*/function (_Error) {
+  _inherits(AbortError, _Error);
 
-  var _super = _createSuper(RequestTimeoutError);
+  var _super = _createSuper(AbortError);
+
+  function AbortError(message) {
+    var _this;
+
+    _classCallCheck(this, AbortError);
+
+    _this = _super.call(this, message);
+    _this.name = 'AbortError';
+    return _this;
+  }
+
+  return _createClass(AbortError);
+}( /*#__PURE__*/_wrapNativeSuper(Error));
+
+exports.AbortError = AbortError;
+
+var RequestTimeoutError = /*#__PURE__*/function (_Error2) {
+  _inherits(RequestTimeoutError, _Error2);
+
+  var _super2 = _createSuper(RequestTimeoutError);
 
   function RequestTimeoutError(message) {
-    var _this;
+    var _this2;
 
     _classCallCheck(this, RequestTimeoutError);
 
-    _this = _super.call(this, message);
-    _this.name = 'RequestTimeoutError';
-    return _this;
+    _this2 = _super2.call(this, message);
+    _this2.name = 'RequestTimeoutError';
+    return _this2;
   }
 
   return _createClass(RequestTimeoutError);
@@ -53,19 +74,19 @@ var RequestTimeoutError = /*#__PURE__*/function (_Error) {
 
 exports.RequestTimeoutError = RequestTimeoutError;
 
-var ClientClosedError = /*#__PURE__*/function (_Error2) {
-  _inherits(ClientClosedError, _Error2);
+var ClientClosedError = /*#__PURE__*/function (_Error3) {
+  _inherits(ClientClosedError, _Error3);
 
-  var _super2 = _createSuper(ClientClosedError);
+  var _super3 = _createSuper(ClientClosedError);
 
   function ClientClosedError(message) {
-    var _this2;
+    var _this3;
 
     _classCallCheck(this, ClientClosedError);
 
-    _this2 = _super2.call(this, message);
-    _this2.name = 'ClientClosedError';
-    return _this2;
+    _this3 = _super3.call(this, message);
+    _this3.name = 'ClientClosedError';
+    return _this3;
   }
 
   return _createClass(ClientClosedError);
@@ -73,20 +94,60 @@ var ClientClosedError = /*#__PURE__*/function (_Error2) {
 
 exports.ClientClosedError = ClientClosedError;
 
-var RequestError = /*#__PURE__*/function (_Error3) {
-  _inherits(RequestError, _Error3);
+var InvitationDeclinedError = /*#__PURE__*/function (_Error4) {
+  _inherits(InvitationDeclinedError, _Error4);
 
-  var _super3 = _createSuper(RequestError);
+  var _super4 = _createSuper(InvitationDeclinedError);
+
+  function InvitationDeclinedError(message) {
+    var _this4;
+
+    _classCallCheck(this, InvitationDeclinedError);
+
+    _this4 = _super4.call(this, message);
+    _this4.name = 'InvitationDeclinedError';
+    return _this4;
+  }
+
+  return _createClass(InvitationDeclinedError);
+}( /*#__PURE__*/_wrapNativeSuper(Error));
+
+exports.InvitationDeclinedError = InvitationDeclinedError;
+
+var InvitationTimeoutError = /*#__PURE__*/function (_Error5) {
+  _inherits(InvitationTimeoutError, _Error5);
+
+  var _super5 = _createSuper(InvitationTimeoutError);
+
+  function InvitationTimeoutError(message) {
+    var _this5;
+
+    _classCallCheck(this, InvitationTimeoutError);
+
+    _this5 = _super5.call(this, message);
+    _this5.name = 'InvitationTimeoutError';
+    return _this5;
+  }
+
+  return _createClass(InvitationTimeoutError);
+}( /*#__PURE__*/_wrapNativeSuper(Error));
+
+exports.InvitationTimeoutError = InvitationTimeoutError;
+
+var RequestError = /*#__PURE__*/function (_Error6) {
+  _inherits(RequestError, _Error6);
+
+  var _super6 = _createSuper(RequestError);
 
   function RequestError(message, code) {
-    var _this3;
+    var _this6;
 
     _classCallCheck(this, RequestError);
 
-    _this3 = _super3.call(this, message);
-    _this3.name = 'RequestError';
-    _this3.code = code;
-    return _this3;
+    _this6 = _super6.call(this, message);
+    _this6.name = 'RequestError';
+    _this6.code = code;
+    return _this6;
   }
 
   return _createClass(RequestError);
@@ -97,16 +158,16 @@ exports.RequestError = RequestError;
 var StartSessionError = /*#__PURE__*/function (_RequestError) {
   _inherits(StartSessionError, _RequestError);
 
-  var _super4 = _createSuper(StartSessionError);
+  var _super7 = _createSuper(StartSessionError);
 
   function StartSessionError(message, code) {
-    var _this4;
+    var _this7;
 
     _classCallCheck(this, StartSessionError);
 
-    _this4 = _super4.call(this, message, code);
-    _this4.name = 'StartSessionError';
-    return _this4;
+    _this7 = _super7.call(this, message, code);
+    _this7.name = 'StartSessionError';
+    return _this7;
   }
 
   return _createClass(StartSessionError);
@@ -117,16 +178,16 @@ exports.StartSessionError = StartSessionError;
 var JoinSessionError = /*#__PURE__*/function (_RequestError2) {
   _inherits(JoinSessionError, _RequestError2);
 
-  var _super5 = _createSuper(JoinSessionError);
+  var _super8 = _createSuper(JoinSessionError);
 
   function JoinSessionError(message, code) {
-    var _this5;
+    var _this8;
 
     _classCallCheck(this, JoinSessionError);
 
-    _this5 = _super5.call(this, message, code);
-    _this5.name = 'JoinSessionError';
-    return _this5;
+    _this8 = _super8.call(this, message, code);
+    _this8.name = 'JoinSessionError';
+    return _this8;
   }
 
   return _createClass(JoinSessionError);
@@ -137,16 +198,16 @@ exports.JoinSessionError = JoinSessionError;
 var LeaveSessionError = /*#__PURE__*/function (_RequestError3) {
   _inherits(LeaveSessionError, _RequestError3);
 
-  var _super6 = _createSuper(LeaveSessionError);
+  var _super9 = _createSuper(LeaveSessionError);
 
   function LeaveSessionError(message, code) {
-    var _this6;
+    var _this9;
 
     _classCallCheck(this, LeaveSessionError);
 
-    _this6 = _super6.call(this, message, code);
-    _this6.name = 'LeaveSessionError';
-    return _this6;
+    _this9 = _super9.call(this, message, code);
+    _this9.name = 'LeaveSessionError';
+    return _this9;
   }
 
   return _createClass(LeaveSessionError);
@@ -157,16 +218,16 @@ exports.LeaveSessionError = LeaveSessionError;
 var InviteToSessionError = /*#__PURE__*/function (_RequestError4) {
   _inherits(InviteToSessionError, _RequestError4);
 
-  var _super7 = _createSuper(InviteToSessionError);
+  var _super10 = _createSuper(InviteToSessionError);
 
   function InviteToSessionError(message, code) {
-    var _this7;
+    var _this10;
 
     _classCallCheck(this, InviteToSessionError);
 
-    _this7 = _super7.call(this, message, code);
-    _this7.name = 'InviteToSessionError';
-    return _this7;
+    _this10 = _super10.call(this, message, code);
+    _this10.name = 'InviteToSessionError';
+    return _this10;
   }
 
   return _createClass(InviteToSessionError);
@@ -177,16 +238,16 @@ exports.InviteToSessionError = InviteToSessionError;
 var SignalError = /*#__PURE__*/function (_RequestError5) {
   _inherits(SignalError, _RequestError5);
 
-  var _super8 = _createSuper(SignalError);
+  var _super11 = _createSuper(SignalError);
 
   function SignalError(message, code) {
-    var _this8;
+    var _this11;
 
     _classCallCheck(this, SignalError);
 
-    _this8 = _super8.call(this, message, code);
-    _this8.name = 'SignalError';
-    return _this8;
+    _this11 = _super11.call(this, message, code);
+    _this11.name = 'SignalError';
+    return _this11;
   }
 
   return _createClass(SignalError);
@@ -197,20 +258,40 @@ exports.SignalError = SignalError;
 var SessionJoinResponseError = /*#__PURE__*/function (_RequestError6) {
   _inherits(SessionJoinResponseError, _RequestError6);
 
-  var _super9 = _createSuper(SessionJoinResponseError);
+  var _super12 = _createSuper(SessionJoinResponseError);
 
   function SessionJoinResponseError(message, code) {
-    var _this9;
+    var _this12;
 
     _classCallCheck(this, SessionJoinResponseError);
 
-    _this9 = _super9.call(this, message, code);
-    _this9.name = 'SessionJoinResponseError';
-    return _this9;
+    _this12 = _super12.call(this, message, code);
+    _this12.name = 'SessionJoinResponseError';
+    return _this12;
   }
 
   return _createClass(SessionJoinResponseError);
 }(RequestError);
 
 exports.SessionJoinResponseError = SessionJoinResponseError;
+
+var DeclineInviteToSessionError = /*#__PURE__*/function (_RequestError7) {
+  _inherits(DeclineInviteToSessionError, _RequestError7);
+
+  var _super13 = _createSuper(DeclineInviteToSessionError);
+
+  function DeclineInviteToSessionError(message, code) {
+    var _this13;
+
+    _classCallCheck(this, DeclineInviteToSessionError);
+
+    _this13 = _super13.call(this, message, code);
+    _this13.name = 'DeclineInviteToSessionError';
+    return _this13;
+  }
+
+  return _createClass(DeclineInviteToSessionError);
+}(RequestError);
+
+exports.DeclineInviteToSessionError = DeclineInviteToSessionError;
 //# sourceMappingURL=errors.js.map

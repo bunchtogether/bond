@@ -1,10 +1,12 @@
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
 import EventEmitter from 'events';
 import ObservedRemoveMap from 'observed-remove/dist/map';
 import SimplePeer from 'simple-peer';
 import PQueue from 'p-queue';
 import { pack, unpack } from 'msgpackr';
-import { SIGNAL, START_SESSION, LEAVE_SESSION, JOIN_SESSION, INVITE_TO_SESSION, SESSION_QUEUE, ABORT_SESSION_JOIN_REQUEST, SESSION_JOIN_REQUEST, SESSION_JOIN_RESPONSE, RESPONSE } from './constants';
-import { RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError, InviteToSessionError } from './errors';
+import { SIGNAL, START_SESSION, LEAVE_SESSION, JOIN_SESSION, INVITE_TO_SESSION, DECLINE_INVITE_TO_SESSION, SESSION_QUEUE, ABORT_SESSION_JOIN_REQUEST, SESSION_JOIN_REQUEST, SESSION_JOIN_RESPONSE, RESPONSE } from './constants';
+import { AbortError, RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError, InviteToSessionError, InvitationDeclinedError, InvitationTimeoutError, DeclineInviteToSessionError } from './errors';
 import { Ping, Pong, ObservedRemoveDump } from './messagepack';
 
 const getSocketMap = values => {
@@ -71,6 +73,7 @@ export class Bond extends EventEmitter {
     this.peerReconnectMap = new Map();
     this.queueMap = new Map();
     this.sessionMap = new Map();
+    this.inviteDeclineHandlerMap = new Map();
     this.requestCallbackMap = new Map();
     this.signalQueueMap = new Map();
     this.peerDisconnectTimeoutMap = new Map();
@@ -325,6 +328,7 @@ export class Bond extends EventEmitter {
           return;
         }
 
+        console.log(JSON.stringify(value, null, 2));
         this.removeListener('close', handleClose);
         this.braidClient.data.removeListener('set', handleValue);
         this.braidClient.removeListener('error', handleError);
@@ -762,16 +766,23 @@ export class Bond extends EventEmitter {
     return this.startedSessionId === this.sessionId;
   }
 
-  async inviteToSession(userId, data, sessionJoinHandler) {
+  async inviteToSession(userId, options = {}) {
+    const {
+      data,
+      timeoutDuration = 30000,
+      sessionJoinHandler
+    } = options;
     const queue = this.queueMap.get(SESSION_QUEUE);
 
     if (typeof queue !== 'undefined') {
       await queue.onIdle();
     }
 
-    const sessionId = this.sessionId;
+    const hasSessionId = this.sessionId === 'string'; // $FlowFixMe
 
-    if (sessionId === 'string') {
+    const sessionId = this.sessionId || globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
+
+    if (hasSessionId) {
       await this.publish(INVITE_TO_SESSION, {
         userId,
         sessionId,
@@ -779,31 +790,87 @@ export class Bond extends EventEmitter {
       }, {
         CustomError: InviteToSessionError
       });
-      return;
-    } // $FlowFixMe
+    } else {
+      const automaticSessionJoinHandler = async values => {
+        if (values.userId === userId) {
+          return [true, 200, 'Authorized'];
+        }
 
+        if (typeof sessionJoinHandler === 'function') {
+          return sessionJoinHandler(values);
+        }
 
-    const newSessionId = globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
-
-    const automaticSessionJoinHandler = async values => {
-      if (values.userId === userId) {
         return [true, 200, 'Authorized'];
-      }
+      };
 
-      if (typeof sessionJoinHandler === 'function') {
-        return sessionJoinHandler(values);
-      }
+      await this.startSession(sessionId, automaticSessionJoinHandler);
+      await this.publish(INVITE_TO_SESSION, {
+        userId,
+        sessionId,
+        data
+      }, {
+        CustomError: InviteToSessionError
+      });
+    }
 
-      return [true, 200, 'Authorized'];
-    };
+    await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.removeListener('sessionJoin', handleSessionJoin);
+        this.removeListener('close', handleClose);
+        this.inviteDeclineHandlerMap.delete(`${userId}:${sessionId}`);
+      };
 
-    await this.startSession(newSessionId, automaticSessionJoinHandler);
-    await this.publish(INVITE_TO_SESSION, {
-      userId,
-      sessionId: newSessionId,
-      data
-    }, {
-      CustomError: InviteToSessionError
+      const leaveSession = async () => {
+        if (hasSessionId) {
+          return;
+        }
+
+        try {
+          await this.leaveSession();
+        } catch (error) {
+          if (error instanceof ClientClosedError) {
+            return;
+          }
+
+          this.logger.error('Unable to leave session after invite timeout');
+          this.logger.errorStack(error);
+        }
+      };
+
+      const timeout = setTimeout(async () => {
+        cleanup();
+        await leaveSession();
+        reject(new InvitationTimeoutError(`Invitation timed out after ${Math.round(timeoutDuration / 100) / 10} seconds`));
+      }, timeoutDuration);
+
+      const handleSessionJoin = socket => {
+        if (socket.sessionId !== sessionId) {
+          return;
+        }
+
+        if (socket.userId !== userId) {
+          return;
+        }
+
+        cleanup();
+        resolve();
+      };
+
+      const handleClose = () => {
+        cleanup();
+        reject(new ClientClosedError('Closed before invite'));
+      };
+
+      const handleDecline = async () => {
+        cleanup();
+        await leaveSession();
+        reject(new InvitationDeclinedError('Invitation declined'));
+      };
+
+      this.inviteDeclineHandlerMap.set(`${userId}:${sessionId || ''}`, handleDecline);
+      this.addListener('sessionJoin', handleSessionJoin);
+      this.addListener('close', handleClose);
     });
   }
 
@@ -821,13 +888,7 @@ export class Bond extends EventEmitter {
     } else {
       this.sessionJoinHandlerMap.set(sessionId, () => [true, 200, 'Authorized']);
     }
-  } //  addMedia(clientId: number, mediaStream: MediaStream) {
-  //    if(this.sessionClientIds.has(clientId)) {
-  //      throw new Error(`Unable to add media, client ${clientId} is not part of the active session`);
-  //    }
-  //
-  //  }
-
+  }
 
   didJoinSession() {
     if (!this.sessionId) {
@@ -973,6 +1034,38 @@ export class Bond extends EventEmitter {
 
         break;
 
+      case DECLINE_INVITE_TO_SESSION:
+        try {
+          const {
+            userId,
+            sessionId
+          } = value;
+
+          if (typeof userId !== 'string') {
+            this.logger.error('Decline invite request contained an invalid user ID');
+            this.logger.error(JSON.stringify(message));
+            return;
+          }
+
+          if (typeof sessionId !== 'string') {
+            this.logger.error('Decline invite request contained an invalid session ID');
+            this.logger.error(JSON.stringify(message));
+            return;
+          }
+
+          const requestHash = `${userId}:${sessionId}`;
+          const inviteDeclineHandler = this.inviteDeclineHandlerMap.get(requestHash);
+
+          if (typeof inviteDeclineHandler === 'function') {
+            inviteDeclineHandler();
+          }
+        } catch (error) {
+          this.logger.error('Unable to process decline invite request');
+          this.logger.errorStack(error);
+        }
+
+        break;
+
       case ABORT_SESSION_JOIN_REQUEST:
         try {
           const {
@@ -1079,7 +1172,7 @@ export class Bond extends EventEmitter {
                 CustomError: SessionJoinResponseError
               });
             } catch (error) {
-              this.logger.error(`Unable to send session join request for user ${userId} and session ${sessionId}`);
+              this.logger.error(`Unable to send session join response for user ${userId} and session ${sessionId}`);
               this.logger.errorStack(error);
             }
 
@@ -1320,4 +1413,90 @@ export class Bond extends EventEmitter {
   }
 
 }
+
+_defineProperty(Bond, "declineInviteToSession", void 0);
+
+const publish = (braidClient, abortSignal, roomId, type, value, options = {}) => {
+  const name = `signal/${roomId}`;
+  const publishName = `signal/${roomId}/${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(36)}`;
+  const timeoutDuration = typeof options.timeoutDuration === 'number' ? options.timeoutDuration : 5000;
+  const CustomError = typeof options.CustomError === 'function' ? options.CustomError : RequestError;
+  const requestId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      abortSignal.removeEventListener('abort', handleAbort);
+      braidClient.removeServerEventListener(name);
+      braidClient.stopPublishing(publishName);
+    };
+
+    const handleAbort = () => {
+      cleanup();
+      reject(new AbortError(`Publish request aborted before ${type} request completed`));
+    };
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new RequestTimeoutError(`${type} requested timed out after ${timeoutDuration}ms`));
+    }, timeoutDuration);
+
+    const handleMessage = message => {
+      if (typeof message !== 'object') {
+        return;
+      }
+
+      const {
+        requestId: responseId,
+        type: responseType,
+        value: responseValue
+      } = message;
+
+      if (responseType !== RESPONSE) {
+        return;
+      }
+
+      if (responseId !== requestId) {
+        return;
+      }
+
+      const {
+        success,
+        code,
+        text
+      } = responseValue;
+      cleanup();
+
+      if (success) {
+        resolve({
+          code,
+          text
+        });
+        return;
+      }
+
+      reject(new CustomError(text, code));
+    };
+
+    abortSignal.addEventListener('abort', handleAbort);
+    Promise.all([braidClient.startPublishing(publishName), braidClient.addServerEventListener(name, handleMessage)]).then(() => {
+      braidClient.publish(publishName, {
+        requestId,
+        type,
+        value
+      });
+    }).catch(error => {
+      cleanup();
+      reject(error);
+    });
+  });
+};
+
+Bond.declineInviteToSession = (braidClient, abortSignal, data) => {
+  const {
+    roomId
+  } = data;
+  return publish(braidClient, abortSignal, roomId, DECLINE_INVITE_TO_SESSION, data, {
+    CustomError: DeclineInviteToSessionError
+  });
+};
 //# sourceMappingURL=index.js.map

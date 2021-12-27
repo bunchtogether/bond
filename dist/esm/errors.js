@@ -1,3 +1,11 @@
+// $FlowFixMe
+export class AbortError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AbortError';
+  }
+
+}
 export class RequestTimeoutError extends Error {
   constructor(message) {
     super(message);
@@ -9,6 +17,20 @@ export class ClientClosedError extends Error {
   constructor(message) {
     super(message);
     this.name = 'ClientClosedError';
+  }
+
+}
+export class InvitationDeclinedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'InvitationDeclinedError';
+  }
+
+}
+export class InvitationTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'InvitationTimeoutError';
   }
 
 }
@@ -59,6 +81,13 @@ export class SessionJoinResponseError extends RequestError {
   constructor(message, code) {
     super(message, code);
     this.name = 'SessionJoinResponseError';
+  }
+
+}
+export class DeclineInviteToSessionError extends RequestError {
+  constructor(message, code) {
+    super(message, code);
+    this.name = 'DeclineInviteToSessionError';
   }
 
 }
