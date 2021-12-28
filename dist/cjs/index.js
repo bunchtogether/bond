@@ -25,18 +25,6 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
 
-function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { Promise.resolve(value).then(_next, _throw); } }
-
-function _asyncToGenerator(fn) { return function () { var self = this, args = arguments; return new Promise(function (resolve, reject) { var gen = fn.apply(self, args); function _next(value) { asyncGeneratorStep(gen, resolve, reject, _next, _throw, "next", value); } function _throw(err) { asyncGeneratorStep(gen, resolve, reject, _next, _throw, "throw", err); } _next(undefined); }); }; }
-
-function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
-
-function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
-
-function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
-
-function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
-
 function _slicedToArray(arr, i) { return _arrayWithHoles(arr) || _iterableToArrayLimit(arr, i) || _unsupportedIterableToArray(arr, i) || _nonIterableRest(); }
 
 function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
@@ -44,6 +32,10 @@ function _nonIterableRest() { throw new TypeError("Invalid attempt to destructur
 function _iterableToArrayLimit(arr, i) { var _i = arr == null ? null : typeof Symbol !== "undefined" && arr[Symbol.iterator] || arr["@@iterator"]; if (_i == null) return; var _arr = []; var _n = true; var _d = false; var _s, _e; try { for (_i = _i.call(arr); !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"] != null) _i["return"](); } finally { if (_d) throw _e; } } return _arr; }
 
 function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
+
+function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { Promise.resolve(value).then(_next, _throw); } }
+
+function _asyncToGenerator(fn) { return function () { var self = this, args = arguments; return new Promise(function (resolve, reject) { var gen = fn.apply(self, args); function _next(value) { asyncGeneratorStep(gen, resolve, reject, _next, _throw, "next", value); } function _throw(err) { asyncGeneratorStep(gen, resolve, reject, _next, _throw, "throw", err); } _next(undefined); }); }; }
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
@@ -91,6 +83,31 @@ var getSocketMap = function getSocketMap(values) {
   }));
 };
 
+var getSessionId = function getSessionId(values, clientId) {
+  if (typeof values === 'undefined') {
+    return false;
+  }
+
+  var _iterator = _createForOfIteratorHelper(values),
+      _step;
+
+  try {
+    for (_iterator.s(); !(_step = _iterator.n()).done;) {
+      var x = _step.value;
+
+      if (x[3] === clientId) {
+        return x[4] || false;
+      }
+    }
+  } catch (err) {
+    _iterator.e(err);
+  } finally {
+    _iterator.f();
+  }
+
+  return false;
+};
+
 var getPeerIds = function getPeerIds(values) {
   if (typeof values === 'undefined') {
     return new Set();
@@ -104,12 +121,12 @@ var getPeerIds = function getPeerIds(values) {
 var getSessionMap = function getSessionMap(socketMap) {
   var map = new Map();
 
-  var _iterator = _createForOfIteratorHelper(socketMap.values()),
-      _step;
+  var _iterator2 = _createForOfIteratorHelper(socketMap.values()),
+      _step2;
 
   try {
-    for (_iterator.s(); !(_step = _iterator.n()).done;) {
-      var socket = _step.value;
+    for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
+      var socket = _step2.value;
       var clientId = socket.clientId,
           sessionId = socket.sessionId;
       var sessionClientMap = map.get(sessionId);
@@ -121,9 +138,9 @@ var getSessionMap = function getSessionMap(socketMap) {
       }
     }
   } catch (err) {
-    _iterator.e(err);
+    _iterator2.e(err);
   } finally {
-    _iterator.f();
+    _iterator2.f();
   }
 
   return map;
@@ -145,6 +162,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     _this.active = true;
     _this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     _this.roomId = roomId;
+    _this.sessionId = false;
     var name = "signal/".concat(_this.roomId);
     _this.name = name;
     _this.publishName = "signal/".concat(_this.roomId, "/").concat(_this.clientId.toString(36));
@@ -177,247 +195,6 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     } else {
       _this.ready = _this._ready; // eslint-disable-line no-underscore-dangle
     }
-
-    _this.handleSet = function (key, values) {
-      if (key !== name) {
-        return;
-      }
-
-      _this.active = true;
-      var oldSocketMap = _this.socketMap;
-      var newSocketMap = getSocketMap(values);
-      var oldUserIds = _this.userIds;
-      var newUserIds = getPeerIds(values);
-      var oldSessionMap = _this.sessionMap;
-      var newSessionMap = getSessionMap(newSocketMap);
-      var oldSessionClientIds = _this.sessionClientIds;
-      _this.userIds = newUserIds;
-      _this.socketMap = newSocketMap;
-      _this.sessionMap = newSessionMap;
-      var newSessionClientIds = _this.sessionClientIds;
-
-      var _iterator2 = _createForOfIteratorHelper(oldSocketMap),
-          _step2;
-
-      try {
-        for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
-          var _step2$value = _slicedToArray(_step2.value, 2),
-              socketHash = _step2$value[0],
-              socketData = _step2$value[1];
-
-          if (!newSocketMap.has(socketHash)) {
-            _this.emit('socketLeave', socketData);
-          }
-        }
-      } catch (err) {
-        _iterator2.e(err);
-      } finally {
-        _iterator2.f();
-      }
-
-      var _iterator3 = _createForOfIteratorHelper(newSocketMap),
-          _step3;
-
-      try {
-        for (_iterator3.s(); !(_step3 = _iterator3.n()).done;) {
-          var _step3$value = _slicedToArray(_step3.value, 2),
-              _socketHash = _step3$value[0],
-              _socketData = _step3$value[1];
-
-          if (!oldSocketMap.has(_socketHash)) {
-            _this.emit('socketJoin', _socketData);
-          }
-        }
-      } catch (err) {
-        _iterator3.e(err);
-      } finally {
-        _iterator3.f();
-      }
-
-      var _iterator4 = _createForOfIteratorHelper(oldUserIds),
-          _step4;
-
-      try {
-        for (_iterator4.s(); !(_step4 = _iterator4.n()).done;) {
-          var peerUserId = _step4.value;
-
-          if (!newUserIds.has(peerUserId)) {
-            _this.emit('leave', peerUserId);
-          }
-        }
-      } catch (err) {
-        _iterator4.e(err);
-      } finally {
-        _iterator4.f();
-      }
-
-      var _iterator5 = _createForOfIteratorHelper(newUserIds),
-          _step5;
-
-      try {
-        for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
-          var _peerUserId = _step5.value;
-
-          if (!oldUserIds.has(_peerUserId)) {
-            _this.emit('join', _peerUserId);
-          }
-        }
-      } catch (err) {
-        _iterator5.e(err);
-      } finally {
-        _iterator5.f();
-      }
-
-      var _iterator6 = _createForOfIteratorHelper(oldSessionClientIds),
-          _step6;
-
-      try {
-        for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
-          var clientId = _step6.value;
-
-          if (clientId === _this.clientId) {
-            continue;
-          }
-
-          if (!newSessionClientIds.has(clientId)) {
-            _this.emit('sessionClientLeave', clientId);
-          }
-        }
-      } catch (err) {
-        _iterator6.e(err);
-      } finally {
-        _iterator6.f();
-      }
-
-      var _iterator7 = _createForOfIteratorHelper(newSessionClientIds),
-          _step7;
-
-      try {
-        for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
-          var _clientId = _step7.value;
-
-          if (_clientId === _this.clientId) {
-            continue;
-          }
-
-          if (!oldSessionClientIds.has(_clientId)) {
-            _this.emit('sessionClientJoin', _clientId);
-          }
-        }
-      } catch (err) {
-        _iterator7.e(err);
-      } finally {
-        _iterator7.f();
-      }
-
-      var _iterator8 = _createForOfIteratorHelper(oldSessionMap),
-          _step8;
-
-      try {
-        for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
-          var _step8$value = _slicedToArray(_step8.value, 2),
-              sessionId = _step8$value[0],
-              oldSessionSocketMap = _step8$value[1];
-
-          var newSessionSocketMap = newSessionMap.get(sessionId);
-
-          if (typeof newSessionSocketMap === 'undefined') {
-            var _iterator10 = _createForOfIteratorHelper(oldSessionSocketMap.values()),
-                _step10;
-
-            try {
-              for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
-                var _socketData2 = _step10.value;
-
-                _this.emit('sessionLeave', _socketData2);
-              }
-            } catch (err) {
-              _iterator10.e(err);
-            } finally {
-              _iterator10.f();
-            }
-          } else {
-            var _iterator11 = _createForOfIteratorHelper(oldSessionSocketMap),
-                _step11;
-
-            try {
-              for (_iterator11.s(); !(_step11 = _iterator11.n()).done;) {
-                var _step11$value = _slicedToArray(_step11.value, 2),
-                    _socketHash2 = _step11$value[0],
-                    _socketData3 = _step11$value[1];
-
-                if (!newSessionSocketMap.has(_socketHash2)) {
-                  _this.emit('sessionLeave', _socketData3);
-                }
-              }
-            } catch (err) {
-              _iterator11.e(err);
-            } finally {
-              _iterator11.f();
-            }
-          }
-        }
-      } catch (err) {
-        _iterator8.e(err);
-      } finally {
-        _iterator8.f();
-      }
-
-      var _iterator9 = _createForOfIteratorHelper(newSessionMap),
-          _step9;
-
-      try {
-        for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
-          var _step9$value = _slicedToArray(_step9.value, 2),
-              _sessionId = _step9$value[0],
-              _newSessionSocketMap = _step9$value[1];
-
-          var _oldSessionSocketMap = oldSessionMap.get(_sessionId);
-
-          if (typeof _oldSessionSocketMap === 'undefined') {
-            var _iterator12 = _createForOfIteratorHelper(_newSessionSocketMap.values()),
-                _step12;
-
-            try {
-              for (_iterator12.s(); !(_step12 = _iterator12.n()).done;) {
-                var _socketData4 = _step12.value;
-
-                _this.emit('sessionJoin', _socketData4);
-              }
-            } catch (err) {
-              _iterator12.e(err);
-            } finally {
-              _iterator12.f();
-            }
-          } else {
-            var _iterator13 = _createForOfIteratorHelper(_newSessionSocketMap),
-                _step13;
-
-            try {
-              for (_iterator13.s(); !(_step13 = _iterator13.n()).done;) {
-                var _step13$value = _slicedToArray(_step13.value, 2),
-                    _socketHash3 = _step13$value[0],
-                    _socketData5 = _step13$value[1];
-
-                if (!_oldSessionSocketMap.has(_socketHash3)) {
-                  _this.emit('sessionJoin', _socketData5);
-                }
-              }
-            } catch (err) {
-              _iterator13.e(err);
-            } finally {
-              _iterator13.f();
-            }
-          }
-        }
-      } catch (err) {
-        _iterator9.e(err);
-      } finally {
-        _iterator9.f();
-      }
-    };
-
-    _this.braidClient.data.addListener('set', _this.handleSet);
 
     _this.addListener('socketJoin', function (socketData) {
       var clientId = socketData.clientId;
@@ -463,47 +240,305 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       }
     });
 
-    _this.braidClient.addListener('close', function () {
-      var oldSocketData = _toConsumableArray(_this.socketMap.values());
+    _this.addListener('sessionClientJoin', function () {
+      var sessionClientIds = _this.sessionClientIds;
 
-      var oldUserIds = _toConsumableArray(_this.userIds);
-
-      _this.socketMap.clear();
-
-      _this.userIds.clear();
-
-      var _iterator14 = _createForOfIteratorHelper(oldSocketData),
-          _step14;
-
-      try {
-        for (_iterator14.s(); !(_step14 = _iterator14.n()).done;) {
-          var socketData = _step14.value;
-
-          _this.emit('socketLeave', socketData);
-        }
-      } catch (err) {
-        _iterator14.e(err);
-      } finally {
-        _iterator14.f();
+      if (sessionClientIds.size > 1) {
+        return;
       }
 
-      var _iterator15 = _createForOfIteratorHelper(oldUserIds),
-          _step15;
-
-      try {
-        for (_iterator15.s(); !(_step15 = _iterator15.n()).done;) {
-          var oldUserId = _step15.value;
-
-          _this.emit('leave', oldUserId);
-        }
-      } catch (err) {
-        _iterator15.e(err);
-      } finally {
-        _iterator15.f();
-      }
+      clearTimeout(_this.leaveSessionAfterLastClientTimeout);
     });
 
-    _this.braidClient.addListener('reconnect', function (isReconnecting) {
+    _this.addListener('sessionClientLeave', /*#__PURE__*/_asyncToGenerator(function* () {
+      var sessionClientIds = _this.sessionClientIds;
+
+      if (sessionClientIds.size > 1) {
+        return;
+      }
+
+      _this.leaveSessionAfterLastClientTimeout = setTimeout( /*#__PURE__*/_asyncToGenerator(function* () {
+        try {
+          yield _this.leaveSession();
+        } catch (error) {
+          _this.logger.error('Unable to leave session after timeout when last session closed');
+
+          _this.logger.errorStack(error);
+        }
+      }), 5000);
+    }));
+
+    _this.addListener('session', /*#__PURE__*/_asyncToGenerator(function* () {
+      var timelineValue = _this.data.get(_this.clientId);
+
+      _this.data.clear();
+
+      _this.sessionClientOffsetMap.clear();
+
+      if (typeof timelineValue !== 'undefined') {
+        _this.data.set(_this.clientId);
+      }
+    }));
+
+    _this.handleBraidSet = function (key, values) {
+      if (key !== name) {
+        return;
+      }
+
+      _this.active = true;
+      var oldSessionId = _this.sessionId;
+      var newSessionId = getSessionId(values, _this.clientId);
+      var oldSocketMap = _this.socketMap;
+      var newSocketMap = getSocketMap(values);
+      var oldUserIds = _this.userIds;
+      var newUserIds = getPeerIds(values);
+      var oldSessionMap = _this.sessionMap;
+      var newSessionMap = getSessionMap(newSocketMap);
+      var oldLocalSessionSocketMap = typeof oldSessionId === 'string' ? oldSessionMap.get(oldSessionId) || new Map() : new Map();
+      var newLocalSessionSocketMap = typeof newSessionId === 'string' ? newSessionMap.get(newSessionId) || new Map() : new Map();
+      _this.sessionId = newSessionId;
+      _this.userIds = newUserIds;
+      _this.socketMap = newSocketMap;
+      _this.sessionMap = newSessionMap;
+
+      if (newSessionId !== oldSessionId) {
+        _this.emit('session', newSessionId);
+      }
+
+      var _iterator3 = _createForOfIteratorHelper(oldSocketMap),
+          _step3;
+
+      try {
+        for (_iterator3.s(); !(_step3 = _iterator3.n()).done;) {
+          var _step3$value = _slicedToArray(_step3.value, 2),
+              socketHash = _step3$value[0],
+              socketData = _step3$value[1];
+
+          if (!newSocketMap.has(socketHash)) {
+            _this.emit('socketLeave', socketData);
+          }
+        }
+      } catch (err) {
+        _iterator3.e(err);
+      } finally {
+        _iterator3.f();
+      }
+
+      var _iterator4 = _createForOfIteratorHelper(newSocketMap),
+          _step4;
+
+      try {
+        for (_iterator4.s(); !(_step4 = _iterator4.n()).done;) {
+          var _step4$value = _slicedToArray(_step4.value, 2),
+              _socketHash = _step4$value[0],
+              _socketData = _step4$value[1];
+
+          if (!oldSocketMap.has(_socketHash)) {
+            _this.emit('socketJoin', _socketData);
+          }
+        }
+      } catch (err) {
+        _iterator4.e(err);
+      } finally {
+        _iterator4.f();
+      }
+
+      var _iterator5 = _createForOfIteratorHelper(oldUserIds),
+          _step5;
+
+      try {
+        for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
+          var peerUserId = _step5.value;
+
+          if (!newUserIds.has(peerUserId)) {
+            _this.emit('leave', peerUserId);
+          }
+        }
+      } catch (err) {
+        _iterator5.e(err);
+      } finally {
+        _iterator5.f();
+      }
+
+      var _iterator6 = _createForOfIteratorHelper(newUserIds),
+          _step6;
+
+      try {
+        for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
+          var _peerUserId = _step6.value;
+
+          if (!oldUserIds.has(_peerUserId)) {
+            _this.emit('join', _peerUserId);
+          }
+        }
+      } catch (err) {
+        _iterator6.e(err);
+      } finally {
+        _iterator6.f();
+      }
+
+      var _iterator7 = _createForOfIteratorHelper(oldLocalSessionSocketMap),
+          _step7;
+
+      try {
+        for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
+          var _step7$value = _slicedToArray(_step7.value, 2),
+              clientId = _step7$value[0],
+              _socketData2 = _step7$value[1];
+
+          if (clientId === _this.clientId) {
+            continue;
+          }
+
+          if (!newLocalSessionSocketMap.has(clientId)) {
+            _this.emit('sessionClientLeave', clientId, _socketData2);
+          }
+        }
+      } catch (err) {
+        _iterator7.e(err);
+      } finally {
+        _iterator7.f();
+      }
+
+      var _iterator8 = _createForOfIteratorHelper(newLocalSessionSocketMap),
+          _step8;
+
+      try {
+        for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
+          var _step8$value = _slicedToArray(_step8.value, 2),
+              _clientId = _step8$value[0],
+              _socketData3 = _step8$value[1];
+
+          if (_clientId === _this.clientId) {
+            continue;
+          }
+
+          if (!oldLocalSessionSocketMap.has(_clientId)) {
+            _this.emit('sessionClientJoin', _clientId, _socketData3);
+          }
+        }
+      } catch (err) {
+        _iterator8.e(err);
+      } finally {
+        _iterator8.f();
+      }
+
+      var _iterator9 = _createForOfIteratorHelper(oldSessionMap),
+          _step9;
+
+      try {
+        for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
+          var _step9$value = _slicedToArray(_step9.value, 2),
+              sessionId = _step9$value[0],
+              oldSessionSocketMap = _step9$value[1];
+
+          var newSessionSocketMap = newSessionMap.get(sessionId);
+
+          if (typeof newSessionSocketMap === 'undefined') {
+            var _iterator11 = _createForOfIteratorHelper(oldSessionSocketMap.values()),
+                _step11;
+
+            try {
+              for (_iterator11.s(); !(_step11 = _iterator11.n()).done;) {
+                var _socketData4 = _step11.value;
+
+                _this.emit('sessionLeave', _socketData4);
+              }
+            } catch (err) {
+              _iterator11.e(err);
+            } finally {
+              _iterator11.f();
+            }
+          } else {
+            var _iterator12 = _createForOfIteratorHelper(oldSessionSocketMap),
+                _step12;
+
+            try {
+              for (_iterator12.s(); !(_step12 = _iterator12.n()).done;) {
+                var _step12$value = _slicedToArray(_step12.value, 2),
+                    _socketHash2 = _step12$value[0],
+                    _socketData5 = _step12$value[1];
+
+                if (!newSessionSocketMap.has(_socketHash2)) {
+                  _this.emit('sessionLeave', _socketData5);
+                }
+              }
+            } catch (err) {
+              _iterator12.e(err);
+            } finally {
+              _iterator12.f();
+            }
+          }
+        }
+      } catch (err) {
+        _iterator9.e(err);
+      } finally {
+        _iterator9.f();
+      }
+
+      var _iterator10 = _createForOfIteratorHelper(newSessionMap),
+          _step10;
+
+      try {
+        for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
+          var _step10$value = _slicedToArray(_step10.value, 2),
+              _sessionId = _step10$value[0],
+              _newSessionSocketMap = _step10$value[1];
+
+          var _oldSessionSocketMap = oldSessionMap.get(_sessionId);
+
+          if (typeof _oldSessionSocketMap === 'undefined') {
+            var _iterator13 = _createForOfIteratorHelper(_newSessionSocketMap.values()),
+                _step13;
+
+            try {
+              for (_iterator13.s(); !(_step13 = _iterator13.n()).done;) {
+                var _socketData6 = _step13.value;
+
+                _this.emit('sessionJoin', _socketData6);
+              }
+            } catch (err) {
+              _iterator13.e(err);
+            } finally {
+              _iterator13.f();
+            }
+          } else {
+            var _iterator14 = _createForOfIteratorHelper(_newSessionSocketMap),
+                _step14;
+
+            try {
+              for (_iterator14.s(); !(_step14 = _iterator14.n()).done;) {
+                var _step14$value = _slicedToArray(_step14.value, 2),
+                    _socketHash3 = _step14$value[0],
+                    _socketData7 = _step14$value[1];
+
+                if (!_oldSessionSocketMap.has(_socketHash3)) {
+                  _this.emit('sessionJoin', _socketData7);
+                }
+              }
+            } catch (err) {
+              _iterator14.e(err);
+            } finally {
+              _iterator14.f();
+            }
+          }
+        }
+      } catch (err) {
+        _iterator10.e(err);
+      } finally {
+        _iterator10.f();
+      }
+    };
+
+    _this.handleBraidClose = function () {
+      _this.reset();
+    };
+
+    _this.handleBraidCloseRequested = function () {
+      _this.close();
+    };
+
+    _this.handleBraidReconnect = function (isReconnecting) {
       if (!isReconnecting) {
         return;
       }
@@ -566,47 +601,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       _this.braidClient.addListener('close', handleClose);
 
       _this.braidClient.addListener('error', handleError);
-    });
+    };
 
-    _this.addListener('sessionClientJoin', function () {
-      var sessionClientIds = _this.sessionClientIds;
+    _this.braidClient.data.addListener('set', _this.handleBraidSet);
 
-      if (sessionClientIds.size > 1) {
-        return;
-      }
+    _this.braidClient.addListener('close', _this.handleBraidClose);
 
-      clearTimeout(_this.leaveSessionAfterLastClientTimeout);
-    });
+    _this.braidClient.addListener('closeRequested', _this.handleBraidCloseRequested);
 
-    _this.addListener('sessionClientLeave', /*#__PURE__*/_asyncToGenerator(function* () {
-      var sessionClientIds = _this.sessionClientIds;
-
-      if (sessionClientIds.size > 1) {
-        return;
-      }
-
-      if (sessionClientIds.size === 0) {
-        try {
-          yield _this.leaveSession();
-        } catch (error) {
-          _this.logger.error('Unable to leave session after last session closed');
-
-          _this.logger.errorStack(error);
-        }
-
-        return;
-      }
-
-      _this.leaveSessionAfterLastClientTimeout = setTimeout( /*#__PURE__*/_asyncToGenerator(function* () {
-        try {
-          yield _this.leaveSession();
-        } catch (error) {
-          _this.logger.error('Unable to leave session after last session closed');
-
-          _this.logger.errorStack(error);
-        }
-      }), 5000);
-    }));
+    _this.braidClient.addListener('reconnect', _this.handleBraidReconnect);
 
     return _this;
   }
@@ -656,8 +659,6 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return;
             }
 
-            console.log(JSON.stringify(value, null, 2));
-
             _this2.removeListener('close', handleClose);
 
             _this2.braidClient.data.removeListener('set', handleValue);
@@ -688,7 +689,17 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         try {
           yield Promise.all([this.braidClient.subscribe(this.name), this.braidClient.addServerEventListener(this.name, this.handleMessage.bind(this))]);
+
+          if (!this.active) {
+            return;
+          }
+
           yield promise;
+
+          if (!this.active) {
+            return;
+          }
+
           yield this.braidClient.startPublishing(this.publishName);
         } catch (error) {
           this.braidClient.logger.error("Unable to join ".concat(this.roomId));
@@ -836,8 +847,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               resolve();
             };
 
-            var handleSocketLeave = function handleSocketLeave(_ref3) {
-              var oldSocketHash = _ref3.socketHash;
+            var handleSocketLeave = function handleSocketLeave(_ref4) {
+              var oldSocketHash = _ref4.socketHash;
 
               if (socketHash !== oldSocketHash) {
                 return;
@@ -998,7 +1009,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref4 = _asyncToGenerator(function* (data) {
+            var _ref5 = _asyncToGenerator(function* (data) {
               try {
                 yield _this5.publish(_constants.SIGNAL, {
                   serverId: serverId,
@@ -1015,7 +1026,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleSignal(_x4) {
-              return _ref4.apply(this, arguments);
+              return _ref5.apply(this, arguments);
             };
           }();
 
@@ -1060,8 +1071,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             resolve();
           };
 
-          var handleSocketLeave = function handleSocketLeave(_ref5) {
-            var oldSocketHash = _ref5.socketHash;
+          var handleSocketLeave = function handleSocketLeave(_ref6) {
+            var oldSocketHash = _ref6.socketHash;
 
             if (socketHash !== oldSocketHash) {
               return;
@@ -1117,8 +1128,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "disconnectFromPeer",
     value: function () {
-      var _disconnectFromPeer = _asyncToGenerator(function* (_ref6) {
-        var clientId = _ref6.clientId;
+      var _disconnectFromPeer = _asyncToGenerator(function* (_ref7) {
+        var clientId = _ref7.clientId;
         var peer = this.peerMap.get(clientId);
 
         if (typeof peer === 'undefined') {
@@ -1140,19 +1151,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     value: function () {
       var _onIdle = _asyncToGenerator(function* () {
         while (this.queueMap.size > 0) {
-          var _iterator16 = _createForOfIteratorHelper(this.queueMap.values()),
-              _step16;
+          var _iterator15 = _createForOfIteratorHelper(this.queueMap.values()),
+              _step15;
 
           try {
-            for (_iterator16.s(); !(_step16 = _iterator16.n()).done;) {
-              var queue = _step16.value;
+            for (_iterator15.s(); !(_step15 = _iterator15.n()).done;) {
+              var queue = _step15.value;
               yield queue.onIdle();
             } // $FlowFixMe
 
           } catch (err) {
-            _iterator16.e(err);
+            _iterator15.e(err);
           } finally {
-            _iterator16.f();
+            _iterator15.f();
           }
 
           yield new Promise(function (resolve) {
@@ -1169,75 +1180,44 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     }()
   }, {
     key: "cleanupSession",
-    value: function cleanupSession(newSessionId) {
+    value: function cleanupSession() {
       var startedSessionId = this.startedSessionId;
       delete this.startedSessionId;
       delete this.joinedSessionId;
 
       if (typeof startedSessionId === 'string') {
         this.sessionJoinHandlerMap.delete(startedSessionId);
-      }
+      } // const oldSessionId = this.sessionId;
+      // if (oldSessionId === newSessionId) {
+      //  return;
+      // }
+      // const oldSessionClientIds = this.sessionClientIds;
+      // //this.sessionId = newSessionId;
+      // //this.emit('session', newSessionId || false);
+      // const newSessionClientIds = this.sessionClientIds;
+      // /for (const clientId of oldSessionClientIds) {
+      // /  if (clientId === this.clientId) {
+      // /    continue;
+      // /  }
+      // /  if (!newSessionClientIds.has(clientId)) {
+      // /    this.emit('sessionClientLeave', clientId);
+      // /  }
+      // /}
+      // const timelineValue = this.data.get(this.clientId);
+      // this.data.clear();
+      // this.sessionClientOffsetMap.clear();
+      // if (typeof timelineValue !== 'undefined') {
+      //  this.data.set(this.clientId);
+      // }
+      // for (const clientId of newSessionClientIds) {
+      //   if (clientId === this.clientId) {
+      //     continue;
+      //   }
+      //   if (!oldSessionClientIds.has(clientId)) {
+      //     this.emit('sessionClientJoin', clientId);
+      //   }
+      // }
 
-      var oldSessionId = this.sessionId;
-
-      if (oldSessionId === newSessionId) {
-        return;
-      }
-
-      var oldSessionClientIds = this.sessionClientIds;
-      this.sessionId = newSessionId;
-      this.emit('session', newSessionId || false);
-      var newSessionClientIds = this.sessionClientIds;
-
-      var _iterator17 = _createForOfIteratorHelper(oldSessionClientIds),
-          _step17;
-
-      try {
-        for (_iterator17.s(); !(_step17 = _iterator17.n()).done;) {
-          var clientId = _step17.value;
-
-          if (clientId === this.clientId) {
-            continue;
-          }
-
-          if (!newSessionClientIds.has(clientId)) {
-            this.emit('sessionClientLeave', clientId);
-          }
-        }
-      } catch (err) {
-        _iterator17.e(err);
-      } finally {
-        _iterator17.f();
-      }
-
-      var timelineValue = this.data.get(this.clientId);
-      this.data.clear();
-      this.sessionClientOffsetMap.clear();
-
-      if (typeof timelineValue !== 'undefined') {
-        this.data.set(this.clientId);
-      }
-
-      var _iterator18 = _createForOfIteratorHelper(newSessionClientIds),
-          _step18;
-
-      try {
-        for (_iterator18.s(); !(_step18 = _iterator18.n()).done;) {
-          var _clientId2 = _step18.value;
-
-          if (_clientId2 === this.clientId) {
-            continue;
-          }
-
-          if (!oldSessionClientIds.has(_clientId2)) {
-            this.emit('sessionClientJoin', _clientId2);
-          }
-        }
-      } catch (err) {
-        _iterator18.e(err);
-      } finally {
-        _iterator18.f();
-      }
     }
   }, {
     key: "didStartSession",
@@ -1279,7 +1259,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           });
         } else {
           var automaticSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref7 = _asyncToGenerator(function* (values) {
+            var _ref8 = _asyncToGenerator(function* (values) {
               if (values.userId === userId) {
                 return [true, 200, 'Authorized'];
               }
@@ -1292,7 +1272,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function automaticSessionJoinHandler(_x9) {
-              return _ref7.apply(this, arguments);
+              return _ref8.apply(this, arguments);
             };
           }();
 
@@ -1318,7 +1298,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var leaveSession = /*#__PURE__*/function () {
-            var _ref8 = _asyncToGenerator(function* () {
+            var _ref9 = _asyncToGenerator(function* () {
               if (hasSessionId) {
                 return;
               }
@@ -1333,7 +1313,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function leaveSession() {
-              return _ref8.apply(this, arguments);
+              return _ref9.apply(this, arguments);
             };
           }();
 
@@ -1362,14 +1342,14 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref10 = _asyncToGenerator(function* () {
+            var _ref11 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref10.apply(this, arguments);
+              return _ref11.apply(this, arguments);
             };
           }();
 
@@ -1400,7 +1380,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             CustomError: _errors.StartSessionError
           });
         });
-        this.cleanupSession(sessionId);
+        this.cleanupSession();
         this.startedSessionId = sessionId;
 
         if (typeof sessionJoinHandler === 'function') {
@@ -1442,7 +1422,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             CustomError: _errors.JoinSessionError
           });
         });
-        this.cleanupSession(sessionId);
+        this.cleanupSession();
         this.joinedSessionId = sessionId;
       });
 
@@ -1801,9 +1781,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref12) {
-            var newClientId = _ref12.clientId,
-                _p = _ref12.peer;
+          var handlePeer = function handlePeer(_ref13) {
+            var newClientId = _ref13.clientId,
+                _p = _ref13.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -1816,9 +1796,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref13) {
-            var newClientId = _ref13.clientId,
-                _p = _ref13.peer;
+          var handleConnect = function handleConnect(_ref14) {
+            var newClientId = _ref14.clientId,
+                _p = _ref14.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -1928,8 +1908,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (!this.isConnectedToClient(clientId)) {
           yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref14) {
-              var newClientId = _ref14.clientId;
+            var handleConnect = function handleConnect(_ref15) {
+              var newClientId = _ref15.clientId;
 
               if (newClientId !== clientId) {
                 return;
@@ -1989,79 +1969,37 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       });
     }
   }, {
+    key: "reset",
+    value: function reset() {
+      clearTimeout(this.leaveSessionAfterLastClientTimeout);
+      this.handleBraidSet(this.name, []);
+    }
+  }, {
     key: "close",
     value: function close() {
+      var _this13 = this;
+
+      this.reset();
       this.active = false;
-      clearTimeout(this.leaveSessionAfterLastClientTimeout);
-      var oldSessionClientIds = this.sessionClientIds;
+      this.onIdle().catch(function (error) {
+        _this13.logger.error('Error in queue during close');
 
-      var oldSocketData = _toConsumableArray(this.socketMap.values());
+        _this13.logger.errorStack(error);
+      }).finally(function () {
+        _this13.braidClient.data.removeListener('set', _this13.handleBraidSet);
 
-      var oldUserIds = _toConsumableArray(this.userIds);
+        _this13.braidClient.removeListener('close', _this13.handleBraidClose);
 
-      this.braidClient.data.removeListener('set', this.handleSet);
-      this.braidClient.stopPublishing(this.publishName);
-      this.braidClient.unsubscribe(this.name);
-      this.braidClient.removeServerEventListener(this.name);
-      this.socketMap.clear();
-      this.userIds.clear();
+        _this13.braidClient.removeListener('closeRequested', _this13.handleBraidCloseRequested);
 
-      var _iterator19 = _createForOfIteratorHelper(this.peerDisconnectTimeoutMap.values()),
-          _step19;
+        _this13.braidClient.removeListener('reconnect', _this13.handleBraidReconnect);
 
-      try {
-        for (_iterator19.s(); !(_step19 = _iterator19.n()).done;) {
-          var timeout = _step19.value;
-          clearTimeout(timeout);
-        }
-      } catch (err) {
-        _iterator19.e(err);
-      } finally {
-        _iterator19.f();
-      }
+        _this13.braidClient.stopPublishing(_this13.publishName);
 
-      var _iterator20 = _createForOfIteratorHelper(oldSessionClientIds),
-          _step20;
+        _this13.braidClient.removeServerEventListener(_this13.name);
 
-      try {
-        for (_iterator20.s(); !(_step20 = _iterator20.n()).done;) {
-          var clientId = _step20.value;
-          this.emit('sessionClientLeave', clientId);
-        }
-      } catch (err) {
-        _iterator20.e(err);
-      } finally {
-        _iterator20.f();
-      }
-
-      var _iterator21 = _createForOfIteratorHelper(oldSocketData),
-          _step21;
-
-      try {
-        for (_iterator21.s(); !(_step21 = _iterator21.n()).done;) {
-          var socketData = _step21.value;
-          this.emit('socketLeave', socketData);
-        }
-      } catch (err) {
-        _iterator21.e(err);
-      } finally {
-        _iterator21.f();
-      }
-
-      var _iterator22 = _createForOfIteratorHelper(oldUserIds),
-          _step22;
-
-      try {
-        for (_iterator22.s(); !(_step22 = _iterator22.n()).done;) {
-          var userId = _step22.value;
-          this.emit('leave', userId);
-        }
-      } catch (err) {
-        _iterator22.e(err);
-      } finally {
-        _iterator22.f();
-      }
-
+        _this13.braidClient.unsubscribe(_this13.name);
+      });
       this.emit('close');
     }
   }]);

@@ -27,6 +27,20 @@ const getSocketMap = values => {
   }));
 };
 
+const getSessionId = (values, clientId) => {
+  if (typeof values === 'undefined') {
+    return false;
+  }
+
+  for (const x of values) {
+    if (x[3] === clientId) {
+      return x[4] || false;
+    }
+  }
+
+  return false;
+};
+
 const getPeerIds = values => {
   if (typeof values === 'undefined') {
     return new Set();
@@ -61,6 +75,7 @@ export class Bond extends EventEmitter {
     this.active = true;
     this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     this.roomId = roomId;
+    this.sessionId = false;
     const name = `signal/${this.roomId}`;
     this.name = name;
     this.publishName = `signal/${this.roomId}/${this.clientId.toString(36)}`;
@@ -92,102 +107,6 @@ export class Bond extends EventEmitter {
       this.ready = this._ready; // eslint-disable-line no-underscore-dangle
     }
 
-    this.handleSet = (key, values) => {
-      if (key !== name) {
-        return;
-      }
-
-      this.active = true;
-      const oldSocketMap = this.socketMap;
-      const newSocketMap = getSocketMap(values);
-      const oldUserIds = this.userIds;
-      const newUserIds = getPeerIds(values);
-      const oldSessionMap = this.sessionMap;
-      const newSessionMap = getSessionMap(newSocketMap);
-      const oldSessionClientIds = this.sessionClientIds;
-      this.userIds = newUserIds;
-      this.socketMap = newSocketMap;
-      this.sessionMap = newSessionMap;
-      const newSessionClientIds = this.sessionClientIds;
-
-      for (const [socketHash, socketData] of oldSocketMap) {
-        if (!newSocketMap.has(socketHash)) {
-          this.emit('socketLeave', socketData);
-        }
-      }
-
-      for (const [socketHash, socketData] of newSocketMap) {
-        if (!oldSocketMap.has(socketHash)) {
-          this.emit('socketJoin', socketData);
-        }
-      }
-
-      for (const peerUserId of oldUserIds) {
-        if (!newUserIds.has(peerUserId)) {
-          this.emit('leave', peerUserId);
-        }
-      }
-
-      for (const peerUserId of newUserIds) {
-        if (!oldUserIds.has(peerUserId)) {
-          this.emit('join', peerUserId);
-        }
-      }
-
-      for (const clientId of oldSessionClientIds) {
-        if (clientId === this.clientId) {
-          continue;
-        }
-
-        if (!newSessionClientIds.has(clientId)) {
-          this.emit('sessionClientLeave', clientId);
-        }
-      }
-
-      for (const clientId of newSessionClientIds) {
-        if (clientId === this.clientId) {
-          continue;
-        }
-
-        if (!oldSessionClientIds.has(clientId)) {
-          this.emit('sessionClientJoin', clientId);
-        }
-      }
-
-      for (const [sessionId, oldSessionSocketMap] of oldSessionMap) {
-        const newSessionSocketMap = newSessionMap.get(sessionId);
-
-        if (typeof newSessionSocketMap === 'undefined') {
-          for (const socketData of oldSessionSocketMap.values()) {
-            this.emit('sessionLeave', socketData);
-          }
-        } else {
-          for (const [socketHash, socketData] of oldSessionSocketMap) {
-            if (!newSessionSocketMap.has(socketHash)) {
-              this.emit('sessionLeave', socketData);
-            }
-          }
-        }
-      }
-
-      for (const [sessionId, newSessionSocketMap] of newSessionMap) {
-        const oldSessionSocketMap = oldSessionMap.get(sessionId);
-
-        if (typeof oldSessionSocketMap === 'undefined') {
-          for (const socketData of newSessionSocketMap.values()) {
-            this.emit('sessionJoin', socketData);
-          }
-        } else {
-          for (const [socketHash, socketData] of newSessionSocketMap) {
-            if (!oldSessionSocketMap.has(socketHash)) {
-              this.emit('sessionJoin', socketData);
-            }
-          }
-        }
-      }
-    };
-
-    this.braidClient.data.addListener('set', this.handleSet);
     this.addListener('socketJoin', socketData => {
       const {
         clientId
@@ -225,21 +144,152 @@ export class Bond extends EventEmitter {
         this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
       }
     });
-    this.braidClient.addListener('close', () => {
-      const oldSocketData = [...this.socketMap.values()];
-      const oldUserIds = [...this.userIds];
-      this.socketMap.clear();
-      this.userIds.clear();
+    this.addListener('sessionClientJoin', () => {
+      const sessionClientIds = this.sessionClientIds;
 
-      for (const socketData of oldSocketData) {
-        this.emit('socketLeave', socketData);
+      if (sessionClientIds.size > 1) {
+        return;
       }
 
-      for (const oldUserId of oldUserIds) {
-        this.emit('leave', oldUserId);
+      clearTimeout(this.leaveSessionAfterLastClientTimeout);
+    });
+    this.addListener('sessionClientLeave', async () => {
+      const sessionClientIds = this.sessionClientIds;
+
+      if (sessionClientIds.size > 1) {
+        return;
+      }
+
+      this.leaveSessionAfterLastClientTimeout = setTimeout(async () => {
+        try {
+          await this.leaveSession();
+        } catch (error) {
+          this.logger.error('Unable to leave session after timeout when last session closed');
+          this.logger.errorStack(error);
+        }
+      }, 5000);
+    });
+    this.addListener('session', async () => {
+      const timelineValue = this.data.get(this.clientId);
+      this.data.clear();
+      this.sessionClientOffsetMap.clear();
+
+      if (typeof timelineValue !== 'undefined') {
+        this.data.set(this.clientId);
       }
     });
-    this.braidClient.addListener('reconnect', isReconnecting => {
+
+    this.handleBraidSet = (key, values) => {
+      if (key !== name) {
+        return;
+      }
+
+      this.active = true;
+      const oldSessionId = this.sessionId;
+      const newSessionId = getSessionId(values, this.clientId);
+      const oldSocketMap = this.socketMap;
+      const newSocketMap = getSocketMap(values);
+      const oldUserIds = this.userIds;
+      const newUserIds = getPeerIds(values);
+      const oldSessionMap = this.sessionMap;
+      const newSessionMap = getSessionMap(newSocketMap);
+      const oldLocalSessionSocketMap = typeof oldSessionId === 'string' ? oldSessionMap.get(oldSessionId) || new Map() : new Map();
+      const newLocalSessionSocketMap = typeof newSessionId === 'string' ? newSessionMap.get(newSessionId) || new Map() : new Map();
+      this.sessionId = newSessionId;
+      this.userIds = newUserIds;
+      this.socketMap = newSocketMap;
+      this.sessionMap = newSessionMap;
+
+      if (newSessionId !== oldSessionId) {
+        this.emit('session', newSessionId);
+      }
+
+      for (const [socketHash, socketData] of oldSocketMap) {
+        if (!newSocketMap.has(socketHash)) {
+          this.emit('socketLeave', socketData);
+        }
+      }
+
+      for (const [socketHash, socketData] of newSocketMap) {
+        if (!oldSocketMap.has(socketHash)) {
+          this.emit('socketJoin', socketData);
+        }
+      }
+
+      for (const peerUserId of oldUserIds) {
+        if (!newUserIds.has(peerUserId)) {
+          this.emit('leave', peerUserId);
+        }
+      }
+
+      for (const peerUserId of newUserIds) {
+        if (!oldUserIds.has(peerUserId)) {
+          this.emit('join', peerUserId);
+        }
+      }
+
+      for (const [clientId, socketData] of oldLocalSessionSocketMap) {
+        if (clientId === this.clientId) {
+          continue;
+        }
+
+        if (!newLocalSessionSocketMap.has(clientId)) {
+          this.emit('sessionClientLeave', clientId, socketData);
+        }
+      }
+
+      for (const [clientId, socketData] of newLocalSessionSocketMap) {
+        if (clientId === this.clientId) {
+          continue;
+        }
+
+        if (!oldLocalSessionSocketMap.has(clientId)) {
+          this.emit('sessionClientJoin', clientId, socketData);
+        }
+      }
+
+      for (const [sessionId, oldSessionSocketMap] of oldSessionMap) {
+        const newSessionSocketMap = newSessionMap.get(sessionId);
+
+        if (typeof newSessionSocketMap === 'undefined') {
+          for (const socketData of oldSessionSocketMap.values()) {
+            this.emit('sessionLeave', socketData);
+          }
+        } else {
+          for (const [socketHash, socketData] of oldSessionSocketMap) {
+            if (!newSessionSocketMap.has(socketHash)) {
+              this.emit('sessionLeave', socketData);
+            }
+          }
+        }
+      }
+
+      for (const [sessionId, newSessionSocketMap] of newSessionMap) {
+        const oldSessionSocketMap = oldSessionMap.get(sessionId);
+
+        if (typeof oldSessionSocketMap === 'undefined') {
+          for (const socketData of newSessionSocketMap.values()) {
+            this.emit('sessionJoin', socketData);
+          }
+        } else {
+          for (const [socketHash, socketData] of newSessionSocketMap) {
+            if (!oldSessionSocketMap.has(socketHash)) {
+              this.emit('sessionJoin', socketData);
+            }
+          }
+        }
+      }
+    };
+
+    this.handleBraidClose = () => {
+      this.reset();
+    };
+
+    this.handleBraidCloseRequested = () => {
+      this.close();
+    };
+
+    this.handleBraidReconnect = isReconnecting => {
       if (!isReconnecting) {
         return;
       }
@@ -289,43 +339,12 @@ export class Bond extends EventEmitter {
       this.braidClient.addListener('initialized', handleInitialized);
       this.braidClient.addListener('close', handleClose);
       this.braidClient.addListener('error', handleError);
-    });
-    this.addListener('sessionClientJoin', () => {
-      const sessionClientIds = this.sessionClientIds;
+    };
 
-      if (sessionClientIds.size > 1) {
-        return;
-      }
-
-      clearTimeout(this.leaveSessionAfterLastClientTimeout);
-    });
-    this.addListener('sessionClientLeave', async () => {
-      const sessionClientIds = this.sessionClientIds;
-
-      if (sessionClientIds.size > 1) {
-        return;
-      }
-
-      if (sessionClientIds.size === 0) {
-        try {
-          await this.leaveSession();
-        } catch (error) {
-          this.logger.error('Unable to leave session after last session closed');
-          this.logger.errorStack(error);
-        }
-
-        return;
-      }
-
-      this.leaveSessionAfterLastClientTimeout = setTimeout(async () => {
-        try {
-          await this.leaveSession();
-        } catch (error) {
-          this.logger.error('Unable to leave session after last session closed');
-          this.logger.errorStack(error);
-        }
-      }, 5000);
-    });
+    this.braidClient.data.addListener('set', this.handleBraidSet);
+    this.braidClient.addListener('close', this.handleBraidClose);
+    this.braidClient.addListener('closeRequested', this.handleBraidCloseRequested);
+    this.braidClient.addListener('reconnect', this.handleBraidReconnect);
   }
 
   get sessionClientIds() {
@@ -364,7 +383,6 @@ export class Bond extends EventEmitter {
           return;
         }
 
-        console.log(JSON.stringify(value, null, 2));
         this.removeListener('close', handleClose);
         this.braidClient.data.removeListener('set', handleValue);
         this.braidClient.removeListener('error', handleError);
@@ -386,7 +404,17 @@ export class Bond extends EventEmitter {
 
     try {
       await Promise.all([this.braidClient.subscribe(this.name), this.braidClient.addServerEventListener(this.name, this.handleMessage.bind(this))]);
+
+      if (!this.active) {
+        return;
+      }
+
       await promise;
+
+      if (!this.active) {
+        return;
+      }
+
       await this.braidClient.startPublishing(this.publishName);
     } catch (error) {
       this.braidClient.logger.error(`Unable to join ${this.roomId}`);
@@ -746,53 +774,44 @@ export class Bond extends EventEmitter {
     }
   }
 
-  cleanupSession(newSessionId) {
+  cleanupSession() {
     const startedSessionId = this.startedSessionId;
     delete this.startedSessionId;
     delete this.joinedSessionId;
 
     if (typeof startedSessionId === 'string') {
       this.sessionJoinHandlerMap.delete(startedSessionId);
-    }
+    } // const oldSessionId = this.sessionId;
+    // if (oldSessionId === newSessionId) {
+    //  return;
+    // }
+    // const oldSessionClientIds = this.sessionClientIds;
+    // //this.sessionId = newSessionId;
+    // //this.emit('session', newSessionId || false);
+    // const newSessionClientIds = this.sessionClientIds;
+    // /for (const clientId of oldSessionClientIds) {
+    // /  if (clientId === this.clientId) {
+    // /    continue;
+    // /  }
+    // /  if (!newSessionClientIds.has(clientId)) {
+    // /    this.emit('sessionClientLeave', clientId);
+    // /  }
+    // /}
+    // const timelineValue = this.data.get(this.clientId);
+    // this.data.clear();
+    // this.sessionClientOffsetMap.clear();
+    // if (typeof timelineValue !== 'undefined') {
+    //  this.data.set(this.clientId);
+    // }
+    // for (const clientId of newSessionClientIds) {
+    //   if (clientId === this.clientId) {
+    //     continue;
+    //   }
+    //   if (!oldSessionClientIds.has(clientId)) {
+    //     this.emit('sessionClientJoin', clientId);
+    //   }
+    // }
 
-    const oldSessionId = this.sessionId;
-
-    if (oldSessionId === newSessionId) {
-      return;
-    }
-
-    const oldSessionClientIds = this.sessionClientIds;
-    this.sessionId = newSessionId;
-    this.emit('session', newSessionId || false);
-    const newSessionClientIds = this.sessionClientIds;
-
-    for (const clientId of oldSessionClientIds) {
-      if (clientId === this.clientId) {
-        continue;
-      }
-
-      if (!newSessionClientIds.has(clientId)) {
-        this.emit('sessionClientLeave', clientId);
-      }
-    }
-
-    const timelineValue = this.data.get(this.clientId);
-    this.data.clear();
-    this.sessionClientOffsetMap.clear();
-
-    if (typeof timelineValue !== 'undefined') {
-      this.data.set(this.clientId);
-    }
-
-    for (const clientId of newSessionClientIds) {
-      if (clientId === this.clientId) {
-        continue;
-      }
-
-      if (!oldSessionClientIds.has(clientId)) {
-        this.emit('sessionClientJoin', clientId);
-      }
-    }
   }
 
   didStartSession() {
@@ -913,7 +932,7 @@ export class Bond extends EventEmitter {
     }, {
       CustomError: StartSessionError
     }));
-    this.cleanupSession(sessionId);
+    this.cleanupSession();
     this.startedSessionId = sessionId;
 
     if (typeof sessionJoinHandler === 'function') {
@@ -938,7 +957,7 @@ export class Bond extends EventEmitter {
     }, {
       CustomError: JoinSessionError
     }));
-    this.cleanupSession(sessionId);
+    this.cleanupSession();
     this.joinedSessionId = sessionId;
   }
 
@@ -1428,35 +1447,26 @@ export class Bond extends EventEmitter {
     });
   }
 
-  close() {
-    this.active = false;
+  reset() {
     clearTimeout(this.leaveSessionAfterLastClientTimeout);
-    const oldSessionClientIds = this.sessionClientIds;
-    const oldSocketData = [...this.socketMap.values()];
-    const oldUserIds = [...this.userIds];
-    this.braidClient.data.removeListener('set', this.handleSet);
-    this.braidClient.stopPublishing(this.publishName);
-    this.braidClient.unsubscribe(this.name);
-    this.braidClient.removeServerEventListener(this.name);
-    this.socketMap.clear();
-    this.userIds.clear();
+    this.handleBraidSet(this.name, []);
+  }
 
-    for (const timeout of this.peerDisconnectTimeoutMap.values()) {
-      clearTimeout(timeout);
-    }
-
-    for (const clientId of oldSessionClientIds) {
-      this.emit('sessionClientLeave', clientId);
-    }
-
-    for (const socketData of oldSocketData) {
-      this.emit('socketLeave', socketData);
-    }
-
-    for (const userId of oldUserIds) {
-      this.emit('leave', userId);
-    }
-
+  close() {
+    this.reset();
+    this.active = false;
+    this.onIdle().catch(error => {
+      this.logger.error('Error in queue during close');
+      this.logger.errorStack(error);
+    }).finally(() => {
+      this.braidClient.data.removeListener('set', this.handleBraidSet);
+      this.braidClient.removeListener('close', this.handleBraidClose);
+      this.braidClient.removeListener('closeRequested', this.handleBraidCloseRequested);
+      this.braidClient.removeListener('reconnect', this.handleBraidReconnect);
+      this.braidClient.stopPublishing(this.publishName);
+      this.braidClient.removeServerEventListener(this.name);
+      this.braidClient.unsubscribe(this.name);
+    });
     this.emit('close');
   }
 

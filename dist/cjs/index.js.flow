@@ -71,6 +71,18 @@ const getSocketMap = (values?:Array<Connection>):Map<string, Socket> => {
   }));
 };
 
+const getSessionId = (values?:Array<Connection>, clientId:number):(string | false) => {
+  if (typeof values === 'undefined') {
+    return false;
+  }
+  for (const x of values) {
+    if (x[3] === clientId) {
+      return x[4] || false;
+    }
+  }
+  return false;
+};
+
 const getPeerIds = (values?:Array<Connection>):Set<string> => {
   if (typeof values === 'undefined') {
     return new Set();
@@ -110,11 +122,14 @@ export class Bond extends EventEmitter {
   declare peerMap: Map<number, SimplePeer>;
   declare peerReconnectMap: Map<number, number>;
   declare queueMap: Map<string | number, PQueue>;
-  declare handleSet: (string, any) => void;
+  declare handleBraidSet: (string, any) => void;
+  declare handleBraidClose: () => void;
+  declare handleBraidCloseRequested: () => void;
+  declare handleBraidReconnect: (boolean) => void;
   declare signalQueueMap: Map<number, Array<[string, Object]>>;
   declare requestCallbackMap: Map<number, (boolean, number, string) => void | Promise<void>>;
   declare inviteDeclineHandlerMap: Map<string, () => Promise<void>>;
-  declare sessionId: void | string;
+  declare sessionId: false | string;
   declare startedSessionId: void | string;
   declare joinedSessionId: void | string;
   declare active: boolean;
@@ -130,6 +145,7 @@ export class Bond extends EventEmitter {
     this.active = true;
     this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     this.roomId = roomId;
+    this.sessionId = false;
     const name = `signal/${this.roomId}`;
     this.name = name;
     this.publishName = `signal/${this.roomId}/${this.clientId.toString(36)}`;
@@ -157,22 +173,86 @@ export class Bond extends EventEmitter {
     } else {
       this.ready = this._ready; // eslint-disable-line no-underscore-dangle
     }
-    this.handleSet = (key:string, values:Array<Connection>) => {
+    this.addListener('socketJoin', (socketData:Socket) => {
+      const { clientId } = socketData;
+      if (clientId === this.clientId) {
+        return;
+      }
+      if (this.peerDisconnectTimeoutMap.has(clientId)) {
+        this.logger.info(`Clearing client ${clientId} disconnect timeout after socket join`);
+        clearTimeout(this.peerDisconnectTimeoutMap.get(clientId));
+        this.peerDisconnectTimeoutMap.delete(clientId);
+      }
+      this.addToQueue(clientId, () => this.connectToPeer(socketData));
+    });
+    this.addListener('socketLeave', (socketData:Socket) => {
+      const { clientId } = socketData;
+      if (clientId === this.clientId) {
+        return;
+      }
+      clearTimeout(this.peerDisconnectTimeoutMap.get(clientId));
+      if (this.active) {
+        this.peerDisconnectTimeoutMap.set(clientId, setTimeout(() => {
+          this.peerDisconnectTimeoutMap.delete(clientId);
+          this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
+        }, 15000));
+      } else {
+        this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
+      }
+    });
+    this.addListener('sessionClientJoin', () => {
+      const sessionClientIds = this.sessionClientIds;
+      if (sessionClientIds.size > 1) {
+        return;
+      }
+      clearTimeout(this.leaveSessionAfterLastClientTimeout);
+    });
+    this.addListener('sessionClientLeave', async () => {
+      const sessionClientIds = this.sessionClientIds;
+      if (sessionClientIds.size > 1) {
+        return;
+      }
+      this.leaveSessionAfterLastClientTimeout = setTimeout(async () => {
+        try {
+          await this.leaveSession();
+        } catch (error) {
+          this.logger.error('Unable to leave session after timeout when last session closed');
+          this.logger.errorStack(error);
+        }
+      }, 5000);
+    });
+
+    this.addListener('session', async () => {
+      const timelineValue = this.data.get(this.clientId);
+      this.data.clear();
+      this.sessionClientOffsetMap.clear();
+      if (typeof timelineValue !== 'undefined') {
+        this.data.set(this.clientId);
+      }
+    });
+
+    this.handleBraidSet = (key:string, values:Array<Connection>) => {
       if (key !== name) {
         return;
       }
       this.active = true;
+      const oldSessionId = this.sessionId;
+      const newSessionId = getSessionId(values, this.clientId);
       const oldSocketMap = this.socketMap;
       const newSocketMap = getSocketMap(values);
       const oldUserIds = this.userIds;
       const newUserIds = getPeerIds(values);
       const oldSessionMap = this.sessionMap;
       const newSessionMap = getSessionMap(newSocketMap);
-      const oldSessionClientIds = this.sessionClientIds;
+      const oldLocalSessionSocketMap = typeof oldSessionId === 'string' ? oldSessionMap.get(oldSessionId) || new Map() : new Map();
+      const newLocalSessionSocketMap = typeof newSessionId === 'string' ? newSessionMap.get(newSessionId) || new Map() : new Map();
+      this.sessionId = newSessionId;
       this.userIds = newUserIds;
       this.socketMap = newSocketMap;
       this.sessionMap = newSessionMap;
-      const newSessionClientIds = this.sessionClientIds;
+      if (newSessionId !== oldSessionId) {
+        this.emit('session', newSessionId);
+      }
       for (const [socketHash, socketData] of oldSocketMap) {
         if (!newSocketMap.has(socketHash)) {
           this.emit('socketLeave', socketData);
@@ -193,20 +273,20 @@ export class Bond extends EventEmitter {
           this.emit('join', peerUserId);
         }
       }
-      for (const clientId of oldSessionClientIds) {
+      for (const [clientId, socketData] of oldLocalSessionSocketMap) {
         if (clientId === this.clientId) {
           continue;
         }
-        if (!newSessionClientIds.has(clientId)) {
-          this.emit('sessionClientLeave', clientId);
+        if (!newLocalSessionSocketMap.has(clientId)) {
+          this.emit('sessionClientLeave', clientId, socketData);
         }
       }
-      for (const clientId of newSessionClientIds) {
+      for (const [clientId, socketData] of newLocalSessionSocketMap) {
         if (clientId === this.clientId) {
           continue;
         }
-        if (!oldSessionClientIds.has(clientId)) {
-          this.emit('sessionClientJoin', clientId);
+        if (!oldLocalSessionSocketMap.has(clientId)) {
+          this.emit('sessionClientJoin', clientId, socketData);
         }
       }
       for (const [sessionId, oldSessionSocketMap] of oldSessionMap) {
@@ -238,47 +318,13 @@ export class Bond extends EventEmitter {
         }
       }
     };
-    this.braidClient.data.addListener('set', this.handleSet);
-    this.addListener('socketJoin', (socketData:Socket) => {
-      const { clientId } = socketData;
-      if (clientId === this.clientId) {
-        return;
-      }
-      if (this.peerDisconnectTimeoutMap.has(clientId)) {
-        this.logger.info(`Clearing client ${clientId} disconnect timeout after socket join`);
-        clearTimeout(this.peerDisconnectTimeoutMap.get(clientId));
-        this.peerDisconnectTimeoutMap.delete(clientId);
-      }
-      this.addToQueue(clientId, () => this.connectToPeer(socketData));
-    });
-    this.addListener('socketLeave', (socketData:Socket) => {
-      const { clientId } = socketData;
-      if (clientId === this.clientId) {
-        return;
-      }
-      clearTimeout(this.peerDisconnectTimeoutMap.get(clientId));
-      if (this.active) {
-        this.peerDisconnectTimeoutMap.set(clientId, setTimeout(() => {
-          this.peerDisconnectTimeoutMap.delete(clientId);
-          this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
-        }, 15000));
-      } else {
-        this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
-      }
-    });
-    this.braidClient.addListener('close', () => {
-      const oldSocketData = [...this.socketMap.values()];
-      const oldUserIds = [...this.userIds];
-      this.socketMap.clear();
-      this.userIds.clear();
-      for (const socketData of oldSocketData) {
-        this.emit('socketLeave', socketData);
-      }
-      for (const oldUserId of oldUserIds) {
-        this.emit('leave', oldUserId);
-      }
-    });
-    this.braidClient.addListener('reconnect', (isReconnecting: boolean) => {
+    this.handleBraidClose = () => {
+      this.reset();
+    };
+    this.handleBraidCloseRequested = () => {
+      this.close();
+    };
+    this.handleBraidReconnect = (isReconnecting: boolean) => {
       if (!isReconnecting) {
         return;
       }
@@ -320,38 +366,11 @@ export class Bond extends EventEmitter {
       this.braidClient.addListener('initialized', handleInitialized);
       this.braidClient.addListener('close', handleClose);
       this.braidClient.addListener('error', handleError);
-    });
-
-    this.addListener('sessionClientJoin', () => {
-      const sessionClientIds = this.sessionClientIds;
-      if (sessionClientIds.size > 1) {
-        return;
-      }
-      clearTimeout(this.leaveSessionAfterLastClientTimeout);
-    });
-    this.addListener('sessionClientLeave', async () => {
-      const sessionClientIds = this.sessionClientIds;
-      if (sessionClientIds.size > 1) {
-        return;
-      }
-      if (sessionClientIds.size === 0) {
-        try {
-          await this.leaveSession();
-        } catch (error) {
-          this.logger.error('Unable to leave session after last session closed');
-          this.logger.errorStack(error);
-        }
-        return;
-      }
-      this.leaveSessionAfterLastClientTimeout = setTimeout(async () => {
-        try {
-          await this.leaveSession();
-        } catch (error) {
-          this.logger.error('Unable to leave session after last session closed');
-          this.logger.errorStack(error);
-        }
-      }, 5000);
-    });
+    };
+    this.braidClient.data.addListener('set', this.handleBraidSet);
+    this.braidClient.addListener('close', this.handleBraidClose);
+    this.braidClient.addListener('closeRequested', this.handleBraidCloseRequested);
+    this.braidClient.addListener('reconnect', this.handleBraidReconnect);
   }
 
   get sessionClientIds():Set<number> {
@@ -383,7 +402,6 @@ export class Bond extends EventEmitter {
         if (typeof value === 'undefined') {
           return;
         }
-        console.log(JSON.stringify(value, null, 2));
         this.removeListener('close', handleClose);
         this.braidClient.data.removeListener('set', handleValue);
         this.braidClient.removeListener('error', handleError);
@@ -405,7 +423,13 @@ export class Bond extends EventEmitter {
         this.braidClient.subscribe(this.name),
         this.braidClient.addServerEventListener(this.name, this.handleMessage.bind(this)),
       ]);
+      if (!this.active) {
+        return;
+      }
       await promise;
+      if (!this.active) {
+        return;
+      }
       await this.braidClient.startPublishing(this.publishName);
     } catch (error) {
       this.braidClient.logger.error(`Unable to join ${this.roomId}`);
@@ -655,43 +679,43 @@ export class Bond extends EventEmitter {
     }
   }
 
-  cleanupSession(newSessionId?:string) {
+  cleanupSession() {
     const startedSessionId = this.startedSessionId;
     delete this.startedSessionId;
     delete this.joinedSessionId;
     if (typeof startedSessionId === 'string') {
       this.sessionJoinHandlerMap.delete(startedSessionId);
     }
-    const oldSessionId = this.sessionId;
-    if (oldSessionId === newSessionId) {
-      return;
-    }
-    const oldSessionClientIds = this.sessionClientIds;
-    this.sessionId = newSessionId;
-    this.emit('session', newSessionId || false);
-    const newSessionClientIds = this.sessionClientIds;
-    for (const clientId of oldSessionClientIds) {
-      if (clientId === this.clientId) {
-        continue;
-      }
-      if (!newSessionClientIds.has(clientId)) {
-        this.emit('sessionClientLeave', clientId);
-      }
-    }
-    const timelineValue = this.data.get(this.clientId);
-    this.data.clear();
-    this.sessionClientOffsetMap.clear();
-    if (typeof timelineValue !== 'undefined') {
-      this.data.set(this.clientId);
-    }
-    for (const clientId of newSessionClientIds) {
-      if (clientId === this.clientId) {
-        continue;
-      }
-      if (!oldSessionClientIds.has(clientId)) {
-        this.emit('sessionClientJoin', clientId);
-      }
-    }
+    // const oldSessionId = this.sessionId;
+    // if (oldSessionId === newSessionId) {
+    //  return;
+    // }
+    // const oldSessionClientIds = this.sessionClientIds;
+    // //this.sessionId = newSessionId;
+    // //this.emit('session', newSessionId || false);
+    // const newSessionClientIds = this.sessionClientIds;
+    // /for (const clientId of oldSessionClientIds) {
+    // /  if (clientId === this.clientId) {
+    // /    continue;
+    // /  }
+    // /  if (!newSessionClientIds.has(clientId)) {
+    // /    this.emit('sessionClientLeave', clientId);
+    // /  }
+    // /}
+    // const timelineValue = this.data.get(this.clientId);
+    // this.data.clear();
+    // this.sessionClientOffsetMap.clear();
+    // if (typeof timelineValue !== 'undefined') {
+    //  this.data.set(this.clientId);
+    // }
+    // for (const clientId of newSessionClientIds) {
+    //   if (clientId === this.clientId) {
+    //     continue;
+    //   }
+    //   if (!oldSessionClientIds.has(clientId)) {
+    //     this.emit('sessionClientJoin', clientId);
+    //   }
+    // }
   }
 
   didStartSession() {
@@ -775,7 +799,7 @@ export class Bond extends EventEmitter {
 
   async startSession(sessionId:string, sessionJoinHandler?: SessionJoinHandler) {
     await this.addToQueue(SESSION_QUEUE, () => this.publish(START_SESSION, { sessionId }, { CustomError: StartSessionError }));
-    this.cleanupSession(sessionId);
+    this.cleanupSession();
     this.startedSessionId = sessionId;
     if (typeof sessionJoinHandler === 'function') {
       this.sessionJoinHandlerMap.set(sessionId, sessionJoinHandler);
@@ -793,7 +817,7 @@ export class Bond extends EventEmitter {
 
   async joinSession(sessionId:string, timeoutDuration?: number = 30000) {
     await this.addToQueue(SESSION_QUEUE, () => this.publish(JOIN_SESSION, { sessionId, timeoutDuration }, { CustomError: JoinSessionError }));
-    this.cleanupSession(sessionId);
+    this.cleanupSession();
     this.joinedSessionId = sessionId;
   }
 
@@ -1164,30 +1188,26 @@ export class Bond extends EventEmitter {
     return this.publish(DECLINE_INVITE_TO_SESSION, data, { CustomError: DeclineInviteToSessionError });
   }
 
-  close() {
-    this.active = false;
+  reset() {
     clearTimeout(this.leaveSessionAfterLastClientTimeout);
-    const oldSessionClientIds = this.sessionClientIds;
-    const oldSocketData = [...this.socketMap.values()];
-    const oldUserIds = [...this.userIds];
-    this.braidClient.data.removeListener('set', this.handleSet);
-    this.braidClient.stopPublishing(this.publishName);
-    this.braidClient.unsubscribe(this.name);
-    this.braidClient.removeServerEventListener(this.name);
-    this.socketMap.clear();
-    this.userIds.clear();
-    for (const timeout of this.peerDisconnectTimeoutMap.values()) {
-      clearTimeout(timeout);
-    }
-    for (const clientId of oldSessionClientIds) {
-      this.emit('sessionClientLeave', clientId);
-    }
-    for (const socketData of oldSocketData) {
-      this.emit('socketLeave', socketData);
-    }
-    for (const userId of oldUserIds) {
-      this.emit('leave', userId);
-    }
+    this.handleBraidSet(this.name, []);
+  }
+
+  close() {
+    this.reset();
+    this.active = false;
+    this.onIdle().catch((error) => {
+      this.logger.error('Error in queue during close');
+      this.logger.errorStack(error);
+    }).finally(() => {
+      this.braidClient.data.removeListener('set', this.handleBraidSet);
+      this.braidClient.removeListener('close', this.handleBraidClose);
+      this.braidClient.removeListener('closeRequested', this.handleBraidCloseRequested);
+      this.braidClient.removeListener('reconnect', this.handleBraidReconnect);
+      this.braidClient.stopPublishing(this.publishName);
+      this.braidClient.removeServerEventListener(this.name);
+      this.braidClient.unsubscribe(this.name);
+    });
     this.emit('close');
   }
 }
