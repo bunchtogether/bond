@@ -171,13 +171,8 @@ export class Bond extends EventEmitter {
       }, 5000);
     });
     this.addListener('session', async () => {
-      const timelineValue = this.data.get(this.clientId);
       this.data.clear();
       this.sessionClientOffsetMap.clear();
-
-      if (typeof timelineValue !== 'undefined') {
-        this.data.set(this.clientId);
-      }
     });
 
     this.handleBraidSet = (key, values) => {
@@ -797,16 +792,6 @@ export class Bond extends EventEmitter {
     }
   }
 
-  cleanupSession() {
-    const startedSessionId = this.startedSessionId;
-    delete this.startedSessionId;
-    delete this.joinedSessionId;
-
-    if (typeof startedSessionId === 'string') {
-      this.sessionJoinHandlerMap.delete(startedSessionId);
-    }
-  }
-
   didStartSession() {
     if (!this.sessionId) {
       return false;
@@ -975,13 +960,20 @@ export class Bond extends EventEmitter {
   }
 
   async startSession(sessionId, sessionJoinHandler) {
-    await this.addToQueue(SESSION_QUEUE, () => this.publish(START_SESSION, {
-      sessionId
-    }, {
-      CustomError: StartSessionError
-    }));
-    this.cleanupSession();
+    const previousStartedSessionId = this.startedSessionId;
     this.startedSessionId = sessionId;
+
+    try {
+      await this.addToQueue(SESSION_QUEUE, () => this.publish(START_SESSION, {
+        sessionId
+      }, {
+        CustomError: StartSessionError
+      }));
+    } catch (error) {
+      this.startedSessionId = previousStartedSessionId;
+    }
+
+    delete this.joinedSessionId;
 
     if (typeof sessionJoinHandler === 'function') {
       this.sessionJoinHandlerMap.set(sessionId, sessionJoinHandler);
@@ -999,14 +991,27 @@ export class Bond extends EventEmitter {
   }
 
   async joinSession(sessionId, timeoutDuration = 30000) {
-    await this.addToQueue(SESSION_QUEUE, () => this.publish(JOIN_SESSION, {
-      sessionId,
-      timeoutDuration
-    }, {
-      CustomError: JoinSessionError
-    }));
-    this.cleanupSession();
+    const previousJoinedSessionId = this.joinedSessionId;
     this.joinedSessionId = sessionId;
+
+    try {
+      await this.addToQueue(SESSION_QUEUE, () => this.publish(JOIN_SESSION, {
+        sessionId,
+        timeoutDuration
+      }, {
+        CustomError: JoinSessionError
+      }));
+    } catch (error) {
+      this.joinedSessionId = previousJoinedSessionId;
+      throw error;
+    }
+
+    const startedSessionId = this.startedSessionId;
+    delete this.startedSessionId;
+
+    if (typeof startedSessionId === 'string') {
+      this.sessionJoinHandlerMap.delete(startedSessionId);
+    }
   }
 
   async leaveSession() {
@@ -1014,7 +1019,13 @@ export class Bond extends EventEmitter {
       await this.addToQueue(SESSION_QUEUE, () => this.publish(LEAVE_SESSION, {}, {
         CustomError: LeaveSessionError
       }));
-      this.cleanupSession();
+      const startedSessionId = this.startedSessionId;
+      delete this.startedSessionId;
+      delete this.joinedSessionId;
+
+      if (typeof startedSessionId === 'string') {
+        this.sessionJoinHandlerMap.delete(startedSessionId);
+      }
     } catch (error) {
       if (error instanceof ClientClosedError) {
         return;

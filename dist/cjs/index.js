@@ -270,15 +270,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     }));
 
     _this.addListener('session', /*#__PURE__*/_asyncToGenerator(function* () {
-      var timelineValue = _this.data.get(_this.clientId);
-
       _this.data.clear();
 
       _this.sessionClientOffsetMap.clear();
-
-      if (typeof timelineValue !== 'undefined') {
-        _this.data.set(_this.clientId);
-      }
     }));
 
     _this.handleBraidSet = function (key, values) {
@@ -1218,17 +1212,6 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       return onIdle;
     }()
   }, {
-    key: "cleanupSession",
-    value: function cleanupSession() {
-      var startedSessionId = this.startedSessionId;
-      delete this.startedSessionId;
-      delete this.joinedSessionId;
-
-      if (typeof startedSessionId === 'string') {
-        this.sessionJoinHandlerMap.delete(startedSessionId);
-      }
-    }
-  }, {
     key: "didStartSession",
     value: function didStartSession() {
       if (!this.sessionId) {
@@ -1465,15 +1448,22 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       var _startSession = _asyncToGenerator(function* (sessionId, sessionJoinHandler) {
         var _this7 = this;
 
-        yield this.addToQueue(_constants.SESSION_QUEUE, function () {
-          return _this7.publish(_constants.START_SESSION, {
-            sessionId: sessionId
-          }, {
-            CustomError: _errors.StartSessionError
-          });
-        });
-        this.cleanupSession();
+        var previousStartedSessionId = this.startedSessionId;
         this.startedSessionId = sessionId;
+
+        try {
+          yield this.addToQueue(_constants.SESSION_QUEUE, function () {
+            return _this7.publish(_constants.START_SESSION, {
+              sessionId: sessionId
+            }, {
+              CustomError: _errors.StartSessionError
+            });
+          });
+        } catch (error) {
+          this.startedSessionId = previousStartedSessionId;
+        }
+
+        delete this.joinedSessionId;
 
         if (typeof sessionJoinHandler === 'function') {
           this.sessionJoinHandlerMap.set(sessionId, sessionJoinHandler);
@@ -1506,16 +1496,29 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         var _this8 = this;
 
         var timeoutDuration = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 30000;
-        yield this.addToQueue(_constants.SESSION_QUEUE, function () {
-          return _this8.publish(_constants.JOIN_SESSION, {
-            sessionId: sessionId,
-            timeoutDuration: timeoutDuration
-          }, {
-            CustomError: _errors.JoinSessionError
-          });
-        });
-        this.cleanupSession();
+        var previousJoinedSessionId = this.joinedSessionId;
         this.joinedSessionId = sessionId;
+
+        try {
+          yield this.addToQueue(_constants.SESSION_QUEUE, function () {
+            return _this8.publish(_constants.JOIN_SESSION, {
+              sessionId: sessionId,
+              timeoutDuration: timeoutDuration
+            }, {
+              CustomError: _errors.JoinSessionError
+            });
+          });
+        } catch (error) {
+          this.joinedSessionId = previousJoinedSessionId;
+          throw error;
+        }
+
+        var startedSessionId = this.startedSessionId;
+        delete this.startedSessionId;
+
+        if (typeof startedSessionId === 'string') {
+          this.sessionJoinHandlerMap.delete(startedSessionId);
+        }
       });
 
       function joinSession(_x17) {
@@ -1536,7 +1539,13 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               CustomError: _errors.LeaveSessionError
             });
           });
-          this.cleanupSession();
+          var startedSessionId = this.startedSessionId;
+          delete this.startedSessionId;
+          delete this.joinedSessionId;
+
+          if (typeof startedSessionId === 'string') {
+            this.sessionJoinHandlerMap.delete(startedSessionId);
+          }
         } catch (error) {
           if (error instanceof _errors.ClientClosedError) {
             return;
