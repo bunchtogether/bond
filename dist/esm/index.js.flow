@@ -823,6 +823,7 @@ export class Bond extends EventEmitter {
       await this.addToQueue(SESSION_QUEUE, () => this.publish(START_SESSION, { sessionId }, { CustomError: StartSessionError }));
     } catch (error) {
       this.startedSessionId = previousStartedSessionId;
+      throw error;
     }
     delete this.joinedSessionId;
     if (typeof sessionJoinHandler === 'function') {

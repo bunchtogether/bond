@@ -1461,6 +1461,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           });
         } catch (error) {
           this.startedSessionId = previousStartedSessionId;
+          throw error;
         }
 
         delete this.joinedSessionId;

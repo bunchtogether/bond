@@ -971,6 +971,7 @@ export class Bond extends EventEmitter {
       }));
     } catch (error) {
       this.startedSessionId = previousStartedSessionId;
+      throw error;
     }
 
     delete this.joinedSessionId;
