@@ -34,6 +34,7 @@ import {
   ClientClosedError,
   InviteToSessionError,
   InvitationDeclinedError,
+  InvitedUserLeftError,
   InvitationTimeoutError,
   DeclineInviteToSessionError,
 } from './errors';
@@ -109,6 +110,7 @@ export class Bond extends EventEmitter {
 
   declare roomId: string;
   declare clientId: number;
+  declare userId: string;
   declare name: string;
   declare publishName: string;
   declare braidClient: BraidClient;
@@ -144,6 +146,7 @@ export class Bond extends EventEmitter {
     super();
     this.active = true;
     this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    this.userId = userId;
     this.roomId = roomId;
     this.sessionId = false;
     const name = `signal/${this.roomId}`;
@@ -535,10 +538,19 @@ export class Bond extends EventEmitter {
     const addPeerListeners = () => {
       this.peerReconnectMap.set(clientId, 0);
       const cleanup = () => {
+        peer.removeListener('signal', handleSignal);
         peer.removeListener('stream', handleStream);
         peer.removeListener('error', handlePeerError);
         peer.removeListener('close', handlePeerClose);
         peer.removeListener('peerReconnect', handlePeerReconnect);
+      };
+      const handleSignal = async (data:Object) => {
+        try {
+          await this.publish(SIGNAL, { serverId, socketId, data }, { CustomError: SignalError });
+        } catch (error) {
+          this.logger.error(`Unable to signal user ${userId} client ${clientId} closed`);
+          this.logger.errorStack(error);
+        }
       };
       const handleStream = (stream:MediaStream) => {
         if (!this.sessionClientIds.has(clientId)) {
@@ -570,6 +582,7 @@ export class Bond extends EventEmitter {
         this.logger.info(`Reconnected to user ${userId} client ${clientId}`);
         cleanup();
       };
+      peer.addListener('signal', handleSignal);
       peer.addListener('stream', handleStream);
       peer.addListener('close', handlePeerClose);
       peer.addListener('error', handlePeerError);
@@ -655,9 +668,14 @@ export class Bond extends EventEmitter {
     });
   }
 
-  async sendStream(clientId:number, stream:MediaStream) {
+  async addStream(clientId:number, stream:MediaStream) {
     const peer = await this.getConnectedPeer(clientId);
     peer.addStream(stream);
+  }
+
+  async removeStream(clientId:number, stream:MediaStream) {
+    const peer = await this.getConnectedPeer(clientId);
+    peer.removeStream(stream);
   }
 
   async disconnectFromPeer({ clientId }:Socket) {
@@ -686,36 +704,6 @@ export class Bond extends EventEmitter {
     if (typeof startedSessionId === 'string') {
       this.sessionJoinHandlerMap.delete(startedSessionId);
     }
-    // const oldSessionId = this.sessionId;
-    // if (oldSessionId === newSessionId) {
-    //  return;
-    // }
-    // const oldSessionClientIds = this.sessionClientIds;
-    // //this.sessionId = newSessionId;
-    // //this.emit('session', newSessionId || false);
-    // const newSessionClientIds = this.sessionClientIds;
-    // /for (const clientId of oldSessionClientIds) {
-    // /  if (clientId === this.clientId) {
-    // /    continue;
-    // /  }
-    // /  if (!newSessionClientIds.has(clientId)) {
-    // /    this.emit('sessionClientLeave', clientId);
-    // /  }
-    // /}
-    // const timelineValue = this.data.get(this.clientId);
-    // this.data.clear();
-    // this.sessionClientOffsetMap.clear();
-    // if (typeof timelineValue !== 'undefined') {
-    //  this.data.set(this.clientId);
-    // }
-    // for (const clientId of newSessionClientIds) {
-    //   if (clientId === this.clientId) {
-    //     continue;
-    //   }
-    //   if (!oldSessionClientIds.has(clientId)) {
-    //     this.emit('sessionClientJoin', clientId);
-    //   }
-    // }
   }
 
   didStartSession() {
@@ -754,6 +742,9 @@ export class Bond extends EventEmitter {
         clearTimeout(timeout);
         this.removeListener('sessionJoin', handleSessionJoin);
         this.removeListener('close', handleClose);
+        this.removeListener('leave', handleLeave);
+        this.removeListener('session', handleSession);
+        this.removeListener('socketLeave', handleSocketLeave);
         this.inviteDeclineHandlerMap.delete(`${userId}:${sessionId}`);
       };
       const leaveSession = async () => {
@@ -782,6 +773,34 @@ export class Bond extends EventEmitter {
         cleanup();
         resolve();
       };
+      // Only listen for socket leave events if the user is inviting themselves
+      const handleSocketLeave = async (socket: Socket) => {
+        if (socket.userId !== this.userId) {
+          return;
+        }
+        let isOnlySocketForUserId = true;
+        for (const socketData of this.socketMap.values()) {
+          if (socketData.userId !== this.userId) {
+            continue;
+          }
+          if (socketData.clientId === this.clientId) {
+            continue;
+          }
+          isOnlySocketForUserId = false;
+        }
+        if (isOnlySocketForUserId) {
+          cleanup();
+          await leaveSession();
+          reject(new InvitedUserLeftError(`User ${userId} left before accepting the invitation`));
+        }
+      };
+      const handleSession = (newSessionId:string | false) => {
+        if (newSessionId === sessionId) {
+          return;
+        }
+        cleanup();
+        resolve();
+      };
       const handleClose = () => {
         cleanup();
         reject(new ClientClosedError('Closed before invite'));
@@ -791,9 +810,22 @@ export class Bond extends EventEmitter {
         await leaveSession();
         reject(new InvitationDeclinedError('Invitation declined'));
       };
+      const handleLeave = async (peerUserId:string) => {
+        if (userId !== peerUserId) {
+          return;
+        }
+        cleanup();
+        await leaveSession();
+        reject(new InvitedUserLeftError(`User ${userId} left before accepting the invitation`));
+      };
       this.inviteDeclineHandlerMap.set(`${userId}:${sessionId || ''}`, handleDecline);
       this.addListener('sessionJoin', handleSessionJoin);
       this.addListener('close', handleClose);
+      this.addListener('leave', handleLeave);
+      this.addListener('session', handleSession);
+      if (this.userId === userId) {
+        this.addListener('socketLeave', handleSocketLeave);
+      }
     });
   }
 

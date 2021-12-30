@@ -34,6 +34,13 @@ export class InvitationTimeoutError extends Error {
   }
 
 }
+export class InvitedUserLeftError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'InvitedUserLeftError';
+  }
+
+}
 export class RequestError extends Error {
   constructor(message, code) {
     super(message);

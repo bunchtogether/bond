@@ -36,6 +36,13 @@ export class InvitationTimeoutError extends Error {
   }
 }
 
+export class InvitedUserLeftError extends Error {
+  constructor(message:string) {
+    super(message);
+    this.name = 'InvitedUserLeftError';
+  }
+}
+
 export class RequestError extends Error {
   declare code: number;
 
@@ -94,3 +101,4 @@ export class DeclineInviteToSessionError extends RequestError {
     this.name = 'DeclineInviteToSessionError';
   }
 }
+

@@ -6,7 +6,7 @@ import SimplePeer from 'simple-peer';
 import PQueue from 'p-queue';
 import { pack, unpack } from 'msgpackr';
 import { SIGNAL, START_SESSION, LEAVE_SESSION, JOIN_SESSION, INVITE_TO_SESSION, DECLINE_INVITE_TO_SESSION, SESSION_QUEUE, ABORT_SESSION_JOIN_REQUEST, SESSION_JOIN_REQUEST, SESSION_JOIN_RESPONSE, RESPONSE } from './constants';
-import { AbortError, RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError, InviteToSessionError, InvitationDeclinedError, InvitationTimeoutError, DeclineInviteToSessionError } from './errors';
+import { AbortError, RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError, InviteToSessionError, InvitationDeclinedError, InvitedUserLeftError, InvitationTimeoutError, DeclineInviteToSessionError } from './errors';
 import { Ping, Pong, ObservedRemoveDump } from './messagepack';
 
 const getSocketMap = values => {
@@ -74,6 +74,7 @@ export class Bond extends EventEmitter {
     super();
     this.active = true;
     this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    this.userId = userId;
     this.roomId = roomId;
     this.sessionId = false;
     const name = `signal/${this.roomId}`;
@@ -561,10 +562,26 @@ export class Bond extends EventEmitter {
       this.peerReconnectMap.set(clientId, 0);
 
       const cleanup = () => {
+        peer.removeListener('signal', handleSignal);
         peer.removeListener('stream', handleStream);
         peer.removeListener('error', handlePeerError);
         peer.removeListener('close', handlePeerClose);
         peer.removeListener('peerReconnect', handlePeerReconnect);
+      };
+
+      const handleSignal = async data => {
+        try {
+          await this.publish(SIGNAL, {
+            serverId,
+            socketId,
+            data
+          }, {
+            CustomError: SignalError
+          });
+        } catch (error) {
+          this.logger.error(`Unable to signal user ${userId} client ${clientId} closed`);
+          this.logger.errorStack(error);
+        }
       };
 
       const handleStream = stream => {
@@ -620,6 +637,7 @@ export class Bond extends EventEmitter {
         cleanup();
       };
 
+      peer.addListener('signal', handleSignal);
       peer.addListener('stream', handleStream);
       peer.addListener('close', handlePeerClose);
       peer.addListener('error', handlePeerError);
@@ -745,9 +763,14 @@ export class Bond extends EventEmitter {
     });
   }
 
-  async sendStream(clientId, stream) {
+  async addStream(clientId, stream) {
     const peer = await this.getConnectedPeer(clientId);
     peer.addStream(stream);
+  }
+
+  async removeStream(clientId, stream) {
+    const peer = await this.getConnectedPeer(clientId);
+    peer.removeStream(stream);
   }
 
   async disconnectFromPeer({
@@ -781,37 +804,7 @@ export class Bond extends EventEmitter {
 
     if (typeof startedSessionId === 'string') {
       this.sessionJoinHandlerMap.delete(startedSessionId);
-    } // const oldSessionId = this.sessionId;
-    // if (oldSessionId === newSessionId) {
-    //  return;
-    // }
-    // const oldSessionClientIds = this.sessionClientIds;
-    // //this.sessionId = newSessionId;
-    // //this.emit('session', newSessionId || false);
-    // const newSessionClientIds = this.sessionClientIds;
-    // /for (const clientId of oldSessionClientIds) {
-    // /  if (clientId === this.clientId) {
-    // /    continue;
-    // /  }
-    // /  if (!newSessionClientIds.has(clientId)) {
-    // /    this.emit('sessionClientLeave', clientId);
-    // /  }
-    // /}
-    // const timelineValue = this.data.get(this.clientId);
-    // this.data.clear();
-    // this.sessionClientOffsetMap.clear();
-    // if (typeof timelineValue !== 'undefined') {
-    //  this.data.set(this.clientId);
-    // }
-    // for (const clientId of newSessionClientIds) {
-    //   if (clientId === this.clientId) {
-    //     continue;
-    //   }
-    //   if (!oldSessionClientIds.has(clientId)) {
-    //     this.emit('sessionClientJoin', clientId);
-    //   }
-    // }
-
+    }
   }
 
   didStartSession() {
@@ -874,6 +867,9 @@ export class Bond extends EventEmitter {
         clearTimeout(timeout);
         this.removeListener('sessionJoin', handleSessionJoin);
         this.removeListener('close', handleClose);
+        this.removeListener('leave', handleLeave);
+        this.removeListener('session', handleSession);
+        this.removeListener('socketLeave', handleSocketLeave);
         this.inviteDeclineHandlerMap.delete(`${userId}:${sessionId}`);
       };
 
@@ -907,6 +903,42 @@ export class Bond extends EventEmitter {
 
         cleanup();
         resolve();
+      }; // Only listen for socket leave events if the user is inviting themselves
+
+
+      const handleSocketLeave = async socket => {
+        if (socket.userId !== this.userId) {
+          return;
+        }
+
+        let isOnlySocketForUserId = true;
+
+        for (const socketData of this.socketMap.values()) {
+          if (socketData.userId !== this.userId) {
+            continue;
+          }
+
+          if (socketData.clientId === this.clientId) {
+            continue;
+          }
+
+          isOnlySocketForUserId = false;
+        }
+
+        if (isOnlySocketForUserId) {
+          cleanup();
+          await leaveSession();
+          reject(new InvitedUserLeftError(`User ${userId} left before accepting the invitation`));
+        }
+      };
+
+      const handleSession = newSessionId => {
+        if (newSessionId === sessionId) {
+          return;
+        }
+
+        cleanup();
+        resolve();
       };
 
       const handleClose = () => {
@@ -920,9 +952,25 @@ export class Bond extends EventEmitter {
         reject(new InvitationDeclinedError('Invitation declined'));
       };
 
+      const handleLeave = async peerUserId => {
+        if (userId !== peerUserId) {
+          return;
+        }
+
+        cleanup();
+        await leaveSession();
+        reject(new InvitedUserLeftError(`User ${userId} left before accepting the invitation`));
+      };
+
       this.inviteDeclineHandlerMap.set(`${userId}:${sessionId || ''}`, handleDecline);
       this.addListener('sessionJoin', handleSessionJoin);
       this.addListener('close', handleClose);
+      this.addListener('leave', handleLeave);
+      this.addListener('session', handleSession);
+
+      if (this.userId === userId) {
+        this.addListener('socketLeave', handleSocketLeave);
+      }
     });
   }
 

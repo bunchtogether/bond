@@ -5,7 +5,7 @@ function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" =
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.LeaveSessionError = exports.JoinSessionError = exports.InviteToSessionError = exports.InvitationTimeoutError = exports.InvitationDeclinedError = exports.DeclineInviteToSessionError = exports.ClientClosedError = exports.AbortError = void 0;
+exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.LeaveSessionError = exports.JoinSessionError = exports.InvitedUserLeftError = exports.InviteToSessionError = exports.InvitationTimeoutError = exports.InvitationDeclinedError = exports.DeclineInviteToSessionError = exports.ClientClosedError = exports.AbortError = void 0;
 
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
@@ -134,20 +134,40 @@ var InvitationTimeoutError = /*#__PURE__*/function (_Error5) {
 
 exports.InvitationTimeoutError = InvitationTimeoutError;
 
-var RequestError = /*#__PURE__*/function (_Error6) {
-  _inherits(RequestError, _Error6);
+var InvitedUserLeftError = /*#__PURE__*/function (_Error6) {
+  _inherits(InvitedUserLeftError, _Error6);
 
-  var _super6 = _createSuper(RequestError);
+  var _super6 = _createSuper(InvitedUserLeftError);
+
+  function InvitedUserLeftError(message) {
+    var _this6;
+
+    _classCallCheck(this, InvitedUserLeftError);
+
+    _this6 = _super6.call(this, message);
+    _this6.name = 'InvitedUserLeftError';
+    return _this6;
+  }
+
+  return _createClass(InvitedUserLeftError);
+}( /*#__PURE__*/_wrapNativeSuper(Error));
+
+exports.InvitedUserLeftError = InvitedUserLeftError;
+
+var RequestError = /*#__PURE__*/function (_Error7) {
+  _inherits(RequestError, _Error7);
+
+  var _super7 = _createSuper(RequestError);
 
   function RequestError(message, code) {
-    var _this6;
+    var _this7;
 
     _classCallCheck(this, RequestError);
 
-    _this6 = _super6.call(this, message);
-    _this6.name = 'RequestError';
-    _this6.code = code;
-    return _this6;
+    _this7 = _super7.call(this, message);
+    _this7.name = 'RequestError';
+    _this7.code = code;
+    return _this7;
   }
 
   return _createClass(RequestError);
@@ -158,16 +178,16 @@ exports.RequestError = RequestError;
 var StartSessionError = /*#__PURE__*/function (_RequestError) {
   _inherits(StartSessionError, _RequestError);
 
-  var _super7 = _createSuper(StartSessionError);
+  var _super8 = _createSuper(StartSessionError);
 
   function StartSessionError(message, code) {
-    var _this7;
+    var _this8;
 
     _classCallCheck(this, StartSessionError);
 
-    _this7 = _super7.call(this, message, code);
-    _this7.name = 'StartSessionError';
-    return _this7;
+    _this8 = _super8.call(this, message, code);
+    _this8.name = 'StartSessionError';
+    return _this8;
   }
 
   return _createClass(StartSessionError);
@@ -178,16 +198,16 @@ exports.StartSessionError = StartSessionError;
 var JoinSessionError = /*#__PURE__*/function (_RequestError2) {
   _inherits(JoinSessionError, _RequestError2);
 
-  var _super8 = _createSuper(JoinSessionError);
+  var _super9 = _createSuper(JoinSessionError);
 
   function JoinSessionError(message, code) {
-    var _this8;
+    var _this9;
 
     _classCallCheck(this, JoinSessionError);
 
-    _this8 = _super8.call(this, message, code);
-    _this8.name = 'JoinSessionError';
-    return _this8;
+    _this9 = _super9.call(this, message, code);
+    _this9.name = 'JoinSessionError';
+    return _this9;
   }
 
   return _createClass(JoinSessionError);
@@ -198,16 +218,16 @@ exports.JoinSessionError = JoinSessionError;
 var LeaveSessionError = /*#__PURE__*/function (_RequestError3) {
   _inherits(LeaveSessionError, _RequestError3);
 
-  var _super9 = _createSuper(LeaveSessionError);
+  var _super10 = _createSuper(LeaveSessionError);
 
   function LeaveSessionError(message, code) {
-    var _this9;
+    var _this10;
 
     _classCallCheck(this, LeaveSessionError);
 
-    _this9 = _super9.call(this, message, code);
-    _this9.name = 'LeaveSessionError';
-    return _this9;
+    _this10 = _super10.call(this, message, code);
+    _this10.name = 'LeaveSessionError';
+    return _this10;
   }
 
   return _createClass(LeaveSessionError);
@@ -218,16 +238,16 @@ exports.LeaveSessionError = LeaveSessionError;
 var InviteToSessionError = /*#__PURE__*/function (_RequestError4) {
   _inherits(InviteToSessionError, _RequestError4);
 
-  var _super10 = _createSuper(InviteToSessionError);
+  var _super11 = _createSuper(InviteToSessionError);
 
   function InviteToSessionError(message, code) {
-    var _this10;
+    var _this11;
 
     _classCallCheck(this, InviteToSessionError);
 
-    _this10 = _super10.call(this, message, code);
-    _this10.name = 'InviteToSessionError';
-    return _this10;
+    _this11 = _super11.call(this, message, code);
+    _this11.name = 'InviteToSessionError';
+    return _this11;
   }
 
   return _createClass(InviteToSessionError);
@@ -238,16 +258,16 @@ exports.InviteToSessionError = InviteToSessionError;
 var SignalError = /*#__PURE__*/function (_RequestError5) {
   _inherits(SignalError, _RequestError5);
 
-  var _super11 = _createSuper(SignalError);
+  var _super12 = _createSuper(SignalError);
 
   function SignalError(message, code) {
-    var _this11;
+    var _this12;
 
     _classCallCheck(this, SignalError);
 
-    _this11 = _super11.call(this, message, code);
-    _this11.name = 'SignalError';
-    return _this11;
+    _this12 = _super12.call(this, message, code);
+    _this12.name = 'SignalError';
+    return _this12;
   }
 
   return _createClass(SignalError);
@@ -258,16 +278,16 @@ exports.SignalError = SignalError;
 var SessionJoinResponseError = /*#__PURE__*/function (_RequestError6) {
   _inherits(SessionJoinResponseError, _RequestError6);
 
-  var _super12 = _createSuper(SessionJoinResponseError);
+  var _super13 = _createSuper(SessionJoinResponseError);
 
   function SessionJoinResponseError(message, code) {
-    var _this12;
+    var _this13;
 
     _classCallCheck(this, SessionJoinResponseError);
 
-    _this12 = _super12.call(this, message, code);
-    _this12.name = 'SessionJoinResponseError';
-    return _this12;
+    _this13 = _super13.call(this, message, code);
+    _this13.name = 'SessionJoinResponseError';
+    return _this13;
   }
 
   return _createClass(SessionJoinResponseError);
@@ -278,16 +298,16 @@ exports.SessionJoinResponseError = SessionJoinResponseError;
 var DeclineInviteToSessionError = /*#__PURE__*/function (_RequestError7) {
   _inherits(DeclineInviteToSessionError, _RequestError7);
 
-  var _super13 = _createSuper(DeclineInviteToSessionError);
+  var _super14 = _createSuper(DeclineInviteToSessionError);
 
   function DeclineInviteToSessionError(message, code) {
-    var _this13;
+    var _this14;
 
     _classCallCheck(this, DeclineInviteToSessionError);
 
-    _this13 = _super13.call(this, message, code);
-    _this13.name = 'DeclineInviteToSessionError';
-    return _this13;
+    _this14 = _super14.call(this, message, code);
+    _this14.name = 'DeclineInviteToSessionError';
+    return _this14;
   }
 
   return _createClass(DeclineInviteToSessionError);

@@ -161,6 +161,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     _this = _super.call(this);
     _this.active = true;
     _this.clientId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    _this.userId = userId;
     _this.roomId = roomId;
     _this.sessionId = false;
     var name = "signal/".concat(_this.roomId);
@@ -889,11 +890,34 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           _this5.peerReconnectMap.set(clientId, 0);
 
           var cleanup = function cleanup() {
+            peer.removeListener('signal', handleSignal);
             peer.removeListener('stream', handleStream);
             peer.removeListener('error', handlePeerError);
             peer.removeListener('close', handlePeerClose);
             peer.removeListener('peerReconnect', handlePeerReconnect);
           };
+
+          var handleSignal = /*#__PURE__*/function () {
+            var _ref5 = _asyncToGenerator(function* (data) {
+              try {
+                yield _this5.publish(_constants.SIGNAL, {
+                  serverId: serverId,
+                  socketId: socketId,
+                  data: data
+                }, {
+                  CustomError: _errors.SignalError
+                });
+              } catch (error) {
+                _this5.logger.error("Unable to signal user ".concat(userId, " client ").concat(clientId, " closed"));
+
+                _this5.logger.errorStack(error);
+              }
+            });
+
+            return function handleSignal(_x4) {
+              return _ref5.apply(this, arguments);
+            };
+          }();
 
           var handleStream = function handleStream(stream) {
             if (!_this5.sessionClientIds.has(clientId)) {
@@ -956,6 +980,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             cleanup();
           };
 
+          peer.addListener('signal', handleSignal);
           peer.addListener('stream', handleStream);
           peer.addListener('close', handlePeerClose);
           peer.addListener('error', handlePeerError);
@@ -1009,7 +1034,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref5 = _asyncToGenerator(function* (data) {
+            var _ref6 = _asyncToGenerator(function* (data) {
               try {
                 yield _this5.publish(_constants.SIGNAL, {
                   serverId: serverId,
@@ -1025,8 +1050,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSignal(_x4) {
-              return _ref5.apply(this, arguments);
+            return function handleSignal(_x5) {
+              return _ref6.apply(this, arguments);
             };
           }();
 
@@ -1071,8 +1096,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             resolve();
           };
 
-          var handleSocketLeave = function handleSocketLeave(_ref6) {
-            var oldSocketHash = _ref6.socketHash;
+          var handleSocketLeave = function handleSocketLeave(_ref7) {
+            var oldSocketHash = _ref7.socketHash;
 
             if (socketHash !== oldSocketHash) {
               return;
@@ -1112,24 +1137,38 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       return connectToPeer;
     }()
   }, {
-    key: "sendStream",
+    key: "addStream",
     value: function () {
-      var _sendStream = _asyncToGenerator(function* (clientId, stream) {
+      var _addStream = _asyncToGenerator(function* (clientId, stream) {
         var peer = yield this.getConnectedPeer(clientId);
         peer.addStream(stream);
       });
 
-      function sendStream(_x5, _x6) {
-        return _sendStream.apply(this, arguments);
+      function addStream(_x6, _x7) {
+        return _addStream.apply(this, arguments);
       }
 
-      return sendStream;
+      return addStream;
+    }()
+  }, {
+    key: "removeStream",
+    value: function () {
+      var _removeStream = _asyncToGenerator(function* (clientId, stream) {
+        var peer = yield this.getConnectedPeer(clientId);
+        peer.removeStream(stream);
+      });
+
+      function removeStream(_x8, _x9) {
+        return _removeStream.apply(this, arguments);
+      }
+
+      return removeStream;
     }()
   }, {
     key: "disconnectFromPeer",
     value: function () {
-      var _disconnectFromPeer = _asyncToGenerator(function* (_ref7) {
-        var clientId = _ref7.clientId;
+      var _disconnectFromPeer = _asyncToGenerator(function* (_ref8) {
+        var clientId = _ref8.clientId;
         var peer = this.peerMap.get(clientId);
 
         if (typeof peer === 'undefined') {
@@ -1140,7 +1179,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         peer.destroy();
       });
 
-      function disconnectFromPeer(_x7) {
+      function disconnectFromPeer(_x10) {
         return _disconnectFromPeer.apply(this, arguments);
       }
 
@@ -1187,37 +1226,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
       if (typeof startedSessionId === 'string') {
         this.sessionJoinHandlerMap.delete(startedSessionId);
-      } // const oldSessionId = this.sessionId;
-      // if (oldSessionId === newSessionId) {
-      //  return;
-      // }
-      // const oldSessionClientIds = this.sessionClientIds;
-      // //this.sessionId = newSessionId;
-      // //this.emit('session', newSessionId || false);
-      // const newSessionClientIds = this.sessionClientIds;
-      // /for (const clientId of oldSessionClientIds) {
-      // /  if (clientId === this.clientId) {
-      // /    continue;
-      // /  }
-      // /  if (!newSessionClientIds.has(clientId)) {
-      // /    this.emit('sessionClientLeave', clientId);
-      // /  }
-      // /}
-      // const timelineValue = this.data.get(this.clientId);
-      // this.data.clear();
-      // this.sessionClientOffsetMap.clear();
-      // if (typeof timelineValue !== 'undefined') {
-      //  this.data.set(this.clientId);
-      // }
-      // for (const clientId of newSessionClientIds) {
-      //   if (clientId === this.clientId) {
-      //     continue;
-      //   }
-      //   if (!oldSessionClientIds.has(clientId)) {
-      //     this.emit('sessionClientJoin', clientId);
-      //   }
-      // }
-
+      }
     }
   }, {
     key: "didStartSession",
@@ -1259,7 +1268,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           });
         } else {
           var automaticSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref8 = _asyncToGenerator(function* (values) {
+            var _ref9 = _asyncToGenerator(function* (values) {
               if (values.userId === userId) {
                 return [true, 200, 'Authorized'];
               }
@@ -1271,8 +1280,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return [true, 200, 'Authorized'];
             });
 
-            return function automaticSessionJoinHandler(_x9) {
-              return _ref8.apply(this, arguments);
+            return function automaticSessionJoinHandler(_x12) {
+              return _ref9.apply(this, arguments);
             };
           }();
 
@@ -1294,11 +1303,17 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
             _this6.removeListener('close', handleClose);
 
+            _this6.removeListener('leave', handleLeave);
+
+            _this6.removeListener('session', handleSession);
+
+            _this6.removeListener('socketLeave', handleSocketLeave);
+
             _this6.inviteDeclineHandlerMap.delete("".concat(userId, ":").concat(sessionId));
           };
 
           var leaveSession = /*#__PURE__*/function () {
-            var _ref9 = _asyncToGenerator(function* () {
+            var _ref10 = _asyncToGenerator(function* () {
               if (hasSessionId) {
                 return;
               }
@@ -1313,7 +1328,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function leaveSession() {
-              return _ref9.apply(this, arguments);
+              return _ref10.apply(this, arguments);
             };
           }();
 
@@ -1334,6 +1349,59 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
             cleanup();
             resolve();
+          }; // Only listen for socket leave events if the user is inviting themselves
+
+
+          var handleSocketLeave = /*#__PURE__*/function () {
+            var _ref12 = _asyncToGenerator(function* (socket) {
+              if (socket.userId !== _this6.userId) {
+                return;
+              }
+
+              var isOnlySocketForUserId = true;
+
+              var _iterator16 = _createForOfIteratorHelper(_this6.socketMap.values()),
+                  _step16;
+
+              try {
+                for (_iterator16.s(); !(_step16 = _iterator16.n()).done;) {
+                  var socketData = _step16.value;
+
+                  if (socketData.userId !== _this6.userId) {
+                    continue;
+                  }
+
+                  if (socketData.clientId === _this6.clientId) {
+                    continue;
+                  }
+
+                  isOnlySocketForUserId = false;
+                }
+              } catch (err) {
+                _iterator16.e(err);
+              } finally {
+                _iterator16.f();
+              }
+
+              if (isOnlySocketForUserId) {
+                cleanup();
+                yield leaveSession();
+                reject(new _errors.InvitedUserLeftError("User ".concat(userId, " left before accepting the invitation")));
+              }
+            });
+
+            return function handleSocketLeave(_x13) {
+              return _ref12.apply(this, arguments);
+            };
+          }();
+
+          var handleSession = function handleSession(newSessionId) {
+            if (newSessionId === sessionId) {
+              return;
+            }
+
+            cleanup();
+            resolve();
           };
 
           var handleClose = function handleClose() {
@@ -1342,14 +1410,30 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref11 = _asyncToGenerator(function* () {
+            var _ref13 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref11.apply(this, arguments);
+              return _ref13.apply(this, arguments);
+            };
+          }();
+
+          var handleLeave = /*#__PURE__*/function () {
+            var _ref14 = _asyncToGenerator(function* (peerUserId) {
+              if (userId !== peerUserId) {
+                return;
+              }
+
+              cleanup();
+              yield leaveSession();
+              reject(new _errors.InvitedUserLeftError("User ".concat(userId, " left before accepting the invitation")));
+            });
+
+            return function handleLeave(_x14) {
+              return _ref14.apply(this, arguments);
             };
           }();
 
@@ -1358,10 +1442,18 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           _this6.addListener('sessionJoin', handleSessionJoin);
 
           _this6.addListener('close', handleClose);
+
+          _this6.addListener('leave', handleLeave);
+
+          _this6.addListener('session', handleSession);
+
+          if (_this6.userId === userId) {
+            _this6.addListener('socketLeave', handleSocketLeave);
+          }
         });
       });
 
-      function inviteToSession(_x8) {
+      function inviteToSession(_x11) {
         return _inviteToSession.apply(this, arguments);
       }
 
@@ -1392,7 +1484,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function startSession(_x10, _x11) {
+      function startSession(_x15, _x16) {
         return _startSession.apply(this, arguments);
       }
 
@@ -1426,7 +1518,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         this.joinedSessionId = sessionId;
       });
 
-      function joinSession(_x12) {
+      function joinSession(_x17) {
         return _joinSession.apply(this, arguments);
       }
 
@@ -1735,7 +1827,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function handleMessage(_x13) {
+      function handleMessage(_x18) {
         return _handleMessage.apply(this, arguments);
       }
 
@@ -1781,9 +1873,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref13) {
-            var newClientId = _ref13.clientId,
-                _p = _ref13.peer;
+          var handlePeer = function handlePeer(_ref16) {
+            var newClientId = _ref16.clientId,
+                _p = _ref16.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -1796,9 +1888,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref14) {
-            var newClientId = _ref14.clientId,
-                _p = _ref14.peer;
+          var handleConnect = function handleConnect(_ref17) {
+            var newClientId = _ref17.clientId,
+                _p = _ref17.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -1825,7 +1917,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function getConnectedPeer(_x14) {
+      function getConnectedPeer(_x19) {
         return _getConnectedPeer.apply(this, arguments);
       }
 
@@ -1908,8 +2000,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (!this.isConnectedToClient(clientId)) {
           yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref15) {
-              var newClientId = _ref15.clientId;
+            var handleConnect = function handleConnect(_ref18) {
+              var newClientId = _ref18.clientId;
 
               if (newClientId !== clientId) {
                 return;
@@ -1955,7 +2047,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         handleDataPublish(this.data.dump());
       });
 
-      function handleSessionClientJoin(_x15) {
+      function handleSessionClientJoin(_x20) {
         return _handleSessionClientJoin.apply(this, arguments);
       }
 

@@ -1,6 +1,6 @@
 {
   "name": "@bunchtogether/bond",
-  "version": "1.0.06",
+  "version": "1.0.07",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
   "exports": {
