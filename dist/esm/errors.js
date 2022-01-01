@@ -20,6 +20,13 @@ export class ClientClosedError extends Error {
   }
 
 }
+export class InvitationCancelledError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'InvitationCancelledError';
+  }
+
+}
 export class InvitationDeclinedError extends Error {
   constructor(message) {
     super(message);
@@ -74,6 +81,13 @@ export class InviteToSessionError extends RequestError {
   constructor(message, code) {
     super(message, code);
     this.name = 'InviteToSessionError';
+  }
+
+}
+export class CancelInviteToSessionError extends RequestError {
+  constructor(message, code) {
+    super(message, code);
+    this.name = 'CancelInviteToSessionError';
   }
 
 }

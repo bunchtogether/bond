@@ -21,6 +21,7 @@ import {
   SESSION_JOIN_REQUEST,
   SESSION_JOIN_RESPONSE,
   REMOVE_FROM_SESSION,
+  CANCEL_INVITE_TO_SESSION,
   RESPONSE,
 } from './constants';
 import {
@@ -39,6 +40,8 @@ import {
   InvitationTimeoutError,
   DeclineInviteToSessionError,
   RemoveFromSessionError,
+  CancelInviteToSessionError,
+  InvitationCancelledError,
 } from './errors';
 import {
   Ping,
@@ -725,6 +728,21 @@ export class Bond extends EventEmitter {
     await this.publish(REMOVE_FROM_SESSION, { userId, socketId, serverId }, { CustomError: RemoveFromSessionError });
   }
 
+  async cancelInviteToSession(userId:string) {
+    const queue = this.queueMap.get(SESSION_QUEUE);
+    if (typeof queue !== 'undefined') {
+      await queue.onIdle();
+    }
+    const sessionId = this.sessionId; // eslint-disable-line no-undef
+    if (typeof sessionId === 'string') {
+      this.preApprovedSessionUserIdSet.delete(userId);
+      this.emit('cancelInvite', { sessionId, userId });
+      await this.publish(CANCEL_INVITE_TO_SESSION, { sessionId, userId }, { CustomError: CancelInviteToSessionError });
+    } else {
+      this.logger.warn(`Unable to cancel invite to user ${userId}, not in session`);
+    }
+  }
+
   async inviteToSession(userId:string, options?:{ data?:Object, timeoutDuration?: number, sessionJoinHandler?: SessionJoinHandler } = {}) {
     const { data, timeoutDuration = 30000, sessionJoinHandler } = options;
     const queue = this.queueMap.get(SESSION_QUEUE);
@@ -734,13 +752,45 @@ export class Bond extends EventEmitter {
     const hasSessionId = this.sessionId === 'string';
     // $FlowFixMe
     const sessionId = this.sessionId || globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
-    if (hasSessionId) {
-      this.preApprovedSessionUserIdSet.add(userId);
-      await this.publish(INVITE_TO_SESSION, { userId, sessionId, data }, { CustomError: InviteToSessionError });
-    } else {
-      await this.startSession(sessionId, sessionJoinHandler);
-      this.preApprovedSessionUserIdSet.add(userId);
-      await this.publish(INVITE_TO_SESSION, { userId, sessionId, data }, { CustomError: InviteToSessionError });
+    let didCancel = false;
+    const handleCancelInviteBeforePublish = ({ sessionId: cancelledSessionId, userId: cancelledUserId }:{ sessionId:string, userId:string }) => {
+      if (cancelledSessionId !== sessionId) {
+        return;
+      }
+      if (cancelledUserId !== userId) {
+        return;
+      }
+      didCancel = true;
+    };
+    const leaveSession = async () => {
+      if (hasSessionId) {
+        return;
+      }
+      try {
+        await this.leaveSession();
+      } catch (error) {
+        this.logger.error('Unable to leave session');
+        this.logger.errorStack(error);
+      }
+    };
+    this.addListener('cancelInvite', handleCancelInviteBeforePublish);
+    try {
+      if (hasSessionId) {
+        this.preApprovedSessionUserIdSet.add(userId);
+        await this.publish(INVITE_TO_SESSION, { userId, sessionId, data }, { CustomError: InviteToSessionError });
+      } else {
+        await this.startSession(sessionId, sessionJoinHandler);
+        this.preApprovedSessionUserIdSet.add(userId);
+        await this.publish(INVITE_TO_SESSION, { userId, sessionId, data }, { CustomError: InviteToSessionError });
+      }
+    } catch (error) {
+      throw error;
+    } finally {
+      this.removeListener('cancelInvite', handleCancelInviteBeforePublish);
+    }
+    if (didCancel) {
+      await leaveSession();
+      throw new InvitationCancelledError(`Invitation to user ${userId} was cancelled`);
     }
     await new Promise((resolve, reject) => {
       const cleanup = () => {
@@ -750,24 +800,24 @@ export class Bond extends EventEmitter {
         this.removeListener('leave', handleLeave);
         this.removeListener('session', handleSession);
         this.removeListener('socketLeave', handleSocketLeave);
+        this.removeListener('cancelInvite', handleCancelInvite);
         this.inviteDeclineHandlerMap.delete(`${userId}:${sessionId}`);
-      };
-      const leaveSession = async () => {
-        if (hasSessionId) {
-          return;
-        }
-        try {
-          await this.leaveSession();
-        } catch (error) {
-          this.logger.error('Unable to leave session after invite timeout');
-          this.logger.errorStack(error);
-        }
       };
       const timeout = setTimeout(async () => {
         cleanup();
         await leaveSession();
         reject(new InvitationTimeoutError(`Invitation timed out after ${Math.round(timeoutDuration / 100) / 10} seconds`));
       }, timeoutDuration);
+      const handleCancelInvite = ({ sessionId: cancelledSessionId, userId: cancelledUserId }:{ sessionId:string, userId:string }) => {
+        if (cancelledSessionId !== sessionId) {
+          return;
+        }
+        if (cancelledUserId !== userId) {
+          return;
+        }
+        cleanup();
+        reject(new InvitationCancelledError(`Invitation to user ${userId} was cancelled`));
+      };
       const handleSessionJoin = (socket: Socket) => {
         if (socket.sessionId !== sessionId) {
           return;
@@ -831,6 +881,7 @@ export class Bond extends EventEmitter {
       if (this.userId === userId) {
         this.addListener('socketLeave', handleSocketLeave);
       }
+      this.addListener('cancelInvite', handleCancelInvite);
     });
   }
 
@@ -1267,6 +1318,7 @@ export class Bond extends EventEmitter {
   async close() {
     this.reset();
     this.active = false;
+    this.emit('close');
     try {
       await this.onIdle();
     } catch (error) {
@@ -1280,7 +1332,6 @@ export class Bond extends EventEmitter {
     this.braidClient.stopPublishing(this.publishName);
     this.braidClient.removeServerEventListener(this.name);
     this.braidClient.unsubscribe(this.name);
-    this.emit('close');
   }
 }
 

@@ -1267,6 +1267,41 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       return removeFromSession;
     }()
   }, {
+    key: "cancelInviteToSession",
+    value: function () {
+      var _cancelInviteToSession = _asyncToGenerator(function* (userId) {
+        var queue = this.queueMap.get(_constants.SESSION_QUEUE);
+
+        if (typeof queue !== 'undefined') {
+          yield queue.onIdle();
+        }
+
+        var sessionId = this.sessionId; // eslint-disable-line no-undef
+
+        if (typeof sessionId === 'string') {
+          this.preApprovedSessionUserIdSet.delete(userId);
+          this.emit('cancelInvite', {
+            sessionId: sessionId,
+            userId: userId
+          });
+          yield this.publish(_constants.CANCEL_INVITE_TO_SESSION, {
+            sessionId: sessionId,
+            userId: userId
+          }, {
+            CustomError: _errors.CancelInviteToSessionError
+          });
+        } else {
+          this.logger.warn("Unable to cancel invite to user ".concat(userId, ", not in session"));
+        }
+      });
+
+      function cancelInviteToSession(_x12) {
+        return _cancelInviteToSession.apply(this, arguments);
+      }
+
+      return cancelInviteToSession;
+    }()
+  }, {
     key: "inviteToSession",
     value: function () {
       var _inviteToSession = _asyncToGenerator(function* (userId) {
@@ -1287,25 +1322,75 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         var sessionId = this.sessionId || globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
 
-        if (hasSessionId) {
-          this.preApprovedSessionUserIdSet.add(userId);
-          yield this.publish(_constants.INVITE_TO_SESSION, {
-            userId: userId,
-            sessionId: sessionId,
-            data: data
-          }, {
-            CustomError: _errors.InviteToSessionError
+        var didCancel = false;
+
+        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref9) {
+          var cancelledSessionId = _ref9.sessionId,
+              cancelledUserId = _ref9.userId;
+
+          if (cancelledSessionId !== sessionId) {
+            return;
+          }
+
+          if (cancelledUserId !== userId) {
+            return;
+          }
+
+          didCancel = true;
+        };
+
+        var leaveSession = /*#__PURE__*/function () {
+          var _ref10 = _asyncToGenerator(function* () {
+            if (hasSessionId) {
+              return;
+            }
+
+            try {
+              yield _this6.leaveSession();
+            } catch (error) {
+              _this6.logger.error('Unable to leave session');
+
+              _this6.logger.errorStack(error);
+            }
           });
-        } else {
-          yield this.startSession(sessionId, sessionJoinHandler);
-          this.preApprovedSessionUserIdSet.add(userId);
-          yield this.publish(_constants.INVITE_TO_SESSION, {
-            userId: userId,
-            sessionId: sessionId,
-            data: data
-          }, {
-            CustomError: _errors.InviteToSessionError
-          });
+
+          return function leaveSession() {
+            return _ref10.apply(this, arguments);
+          };
+        }();
+
+        this.addListener('cancelInvite', handleCancelInviteBeforePublish);
+
+        try {
+          if (hasSessionId) {
+            this.preApprovedSessionUserIdSet.add(userId);
+            yield this.publish(_constants.INVITE_TO_SESSION, {
+              userId: userId,
+              sessionId: sessionId,
+              data: data
+            }, {
+              CustomError: _errors.InviteToSessionError
+            });
+          } else {
+            yield this.startSession(sessionId, sessionJoinHandler);
+            this.preApprovedSessionUserIdSet.add(userId);
+            yield this.publish(_constants.INVITE_TO_SESSION, {
+              userId: userId,
+              sessionId: sessionId,
+              data: data
+            }, {
+              CustomError: _errors.InviteToSessionError
+            });
+          }
+        } catch (error) {
+          throw error;
+        } finally {
+          this.removeListener('cancelInvite', handleCancelInviteBeforePublish);
+        }
+
+        if (didCancel) {
+          yield leaveSession();
+          throw new _errors.InvitationCancelledError("Invitation to user ".concat(userId, " was cancelled"));
         }
 
         yield new Promise(function (resolve, reject) {
@@ -1322,34 +1407,32 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
             _this6.removeListener('socketLeave', handleSocketLeave);
 
+            _this6.removeListener('cancelInvite', handleCancelInvite);
+
             _this6.inviteDeclineHandlerMap.delete("".concat(userId, ":").concat(sessionId));
           };
-
-          var leaveSession = /*#__PURE__*/function () {
-            var _ref9 = _asyncToGenerator(function* () {
-              if (hasSessionId) {
-                return;
-              }
-
-              try {
-                yield _this6.leaveSession();
-              } catch (error) {
-                _this6.logger.error('Unable to leave session after invite timeout');
-
-                _this6.logger.errorStack(error);
-              }
-            });
-
-            return function leaveSession() {
-              return _ref9.apply(this, arguments);
-            };
-          }();
 
           var timeout = setTimeout( /*#__PURE__*/_asyncToGenerator(function* () {
             cleanup();
             yield leaveSession();
             reject(new _errors.InvitationTimeoutError("Invitation timed out after ".concat(Math.round(timeoutDuration / 100) / 10, " seconds")));
           }), timeoutDuration);
+
+          var handleCancelInvite = function handleCancelInvite(_ref12) {
+            var cancelledSessionId = _ref12.sessionId,
+                cancelledUserId = _ref12.userId;
+
+            if (cancelledSessionId !== sessionId) {
+              return;
+            }
+
+            if (cancelledUserId !== userId) {
+              return;
+            }
+
+            cleanup();
+            reject(new _errors.InvitationCancelledError("Invitation to user ".concat(userId, " was cancelled")));
+          };
 
           var handleSessionJoin = function handleSessionJoin(socket) {
             if (socket.sessionId !== sessionId) {
@@ -1366,7 +1449,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
 
           var handleSocketLeave = /*#__PURE__*/function () {
-            var _ref11 = _asyncToGenerator(function* (socket) {
+            var _ref13 = _asyncToGenerator(function* (socket) {
               if (socket.userId !== _this6.userId) {
                 return;
               }
@@ -1403,8 +1486,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSocketLeave(_x13) {
-              return _ref11.apply(this, arguments);
+            return function handleSocketLeave(_x14) {
+              return _ref13.apply(this, arguments);
             };
           }();
 
@@ -1423,19 +1506,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref12 = _asyncToGenerator(function* () {
+            var _ref14 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref12.apply(this, arguments);
+              return _ref14.apply(this, arguments);
             };
           }();
 
           var handleLeave = /*#__PURE__*/function () {
-            var _ref13 = _asyncToGenerator(function* (peerUserId) {
+            var _ref15 = _asyncToGenerator(function* (peerUserId) {
               if (userId !== peerUserId) {
                 return;
               }
@@ -1445,8 +1528,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               reject(new _errors.InvitedUserLeftError("User ".concat(userId, " left before accepting the invitation")));
             });
 
-            return function handleLeave(_x14) {
-              return _ref13.apply(this, arguments);
+            return function handleLeave(_x15) {
+              return _ref15.apply(this, arguments);
             };
           }();
 
@@ -1463,10 +1546,12 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           if (_this6.userId === userId) {
             _this6.addListener('socketLeave', handleSocketLeave);
           }
+
+          _this6.addListener('cancelInvite', handleCancelInvite);
         });
       });
 
-      function inviteToSession(_x12) {
+      function inviteToSession(_x13) {
         return _inviteToSession.apply(this, arguments);
       }
 
@@ -1499,7 +1584,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (typeof sessionJoinHandler === 'function') {
           var wrappedSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref14 = _asyncToGenerator(function* (values) {
+            var _ref16 = _asyncToGenerator(function* (values) {
               if (_this7.preApprovedSessionUserIdSet.has(values.userId)) {
                 return [true, 200, 'Authorized'];
               }
@@ -1515,8 +1600,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return [true, 200, 'Authorized'];
             });
 
-            return function wrappedSessionJoinHandler(_x17) {
-              return _ref14.apply(this, arguments);
+            return function wrappedSessionJoinHandler(_x18) {
+              return _ref16.apply(this, arguments);
             };
           }();
 
@@ -1528,7 +1613,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function startSession(_x15, _x16) {
+      function startSession(_x16, _x17) {
         return _startSession.apply(this, arguments);
       }
 
@@ -1575,7 +1660,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function joinSession(_x18) {
+      function joinSession(_x19) {
         return _joinSession.apply(this, arguments);
       }
 
@@ -1890,7 +1975,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function handleMessage(_x19) {
+      function handleMessage(_x20) {
         return _handleMessage.apply(this, arguments);
       }
 
@@ -1936,9 +2021,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref16) {
-            var newClientId = _ref16.clientId,
-                _p = _ref16.peer;
+          var handlePeer = function handlePeer(_ref18) {
+            var newClientId = _ref18.clientId,
+                _p = _ref18.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -1951,9 +2036,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref17) {
-            var newClientId = _ref17.clientId,
-                _p = _ref17.peer;
+          var handleConnect = function handleConnect(_ref19) {
+            var newClientId = _ref19.clientId,
+                _p = _ref19.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -1980,7 +2065,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function getConnectedPeer(_x20) {
+      function getConnectedPeer(_x21) {
         return _getConnectedPeer.apply(this, arguments);
       }
 
@@ -2063,8 +2148,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (!this.isConnectedToClient(clientId)) {
           yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref18) {
-              var newClientId = _ref18.clientId;
+            var handleConnect = function handleConnect(_ref20) {
+              var newClientId = _ref20.clientId;
 
               if (newClientId !== clientId) {
                 return;
@@ -2110,7 +2195,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         handleDataPublish(this.data.dump());
       });
 
-      function handleSessionClientJoin(_x21) {
+      function handleSessionClientJoin(_x22) {
         return _handleSessionClientJoin.apply(this, arguments);
       }
 
@@ -2135,6 +2220,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       var _close = _asyncToGenerator(function* () {
         this.reset();
         this.active = false;
+        this.emit('close');
 
         try {
           yield this.onIdle();
@@ -2150,7 +2236,6 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         this.braidClient.stopPublishing(this.publishName);
         this.braidClient.removeServerEventListener(this.name);
         this.braidClient.unsubscribe(this.name);
-        this.emit('close');
       });
 
       function close() {
