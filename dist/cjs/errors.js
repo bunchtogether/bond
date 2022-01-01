@@ -5,7 +5,7 @@ function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" =
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.LeaveSessionError = exports.JoinSessionError = exports.InvitedUserLeftError = exports.InviteToSessionError = exports.InvitationTimeoutError = exports.InvitationDeclinedError = exports.DeclineInviteToSessionError = exports.ClientClosedError = exports.AbortError = void 0;
+exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.RemoveFromSessionError = exports.LeaveSessionError = exports.JoinSessionError = exports.InvitedUserLeftError = exports.InviteToSessionError = exports.InvitationTimeoutError = exports.InvitationDeclinedError = exports.DeclineInviteToSessionError = exports.ClientClosedError = exports.AbortError = void 0;
 
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
@@ -314,4 +314,24 @@ var DeclineInviteToSessionError = /*#__PURE__*/function (_RequestError7) {
 }(RequestError);
 
 exports.DeclineInviteToSessionError = DeclineInviteToSessionError;
+
+var RemoveFromSessionError = /*#__PURE__*/function (_RequestError8) {
+  _inherits(RemoveFromSessionError, _RequestError8);
+
+  var _super15 = _createSuper(RemoveFromSessionError);
+
+  function RemoveFromSessionError(message, code) {
+    var _this15;
+
+    _classCallCheck(this, RemoveFromSessionError);
+
+    _this15 = _super15.call(this, message, code);
+    _this15.name = 'RemoveFromSessionError';
+    return _this15;
+  }
+
+  return _createClass(RemoveFromSessionError);
+}(RequestError);
+
+exports.RemoveFromSessionError = RemoveFromSessionError;
 //# sourceMappingURL=errors.js.map

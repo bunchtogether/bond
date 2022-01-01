@@ -186,6 +186,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       bufferPublishing: 0
     });
     _this.sessionClientOffsetMap = new Map();
+    _this.preApprovedSessionUserIdSet = new Set();
 
     _this.addListener('sessionClientJoin', _this.handleSessionClientJoin.bind(_assertThisInitialized(_this)));
 
@@ -610,23 +611,26 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }
 
   _createClass(Bond, [{
-    key: "sessionClientIds",
+    key: "sessionClientMap",
     get: function get() {
       var sessionId = this.sessionId;
 
       if (typeof sessionId !== 'string') {
-        return new Set();
+        return new Map();
       }
 
       var sessionClientMap = this.sessionMap.get(sessionId);
 
       if (typeof sessionClientMap === 'undefined') {
-        return new Set();
+        return new Map();
       }
 
-      var clientIds = new Set(sessionClientMap.keys());
-      clientIds.delete(this.clientId);
-      return clientIds;
+      return sessionClientMap;
+    }
+  }, {
+    key: "sessionClientIds",
+    get: function get() {
+      return new Set(this.sessionClientMap.keys());
     }
   }, {
     key: "init",
@@ -1221,6 +1225,48 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       return this.startedSessionId === this.sessionId;
     }
   }, {
+    key: "removeFromSession",
+    value: function () {
+      var _removeFromSession = _asyncToGenerator(function* (clientId) {
+        var sessionId = this.sessionId;
+
+        if (sessionId === false) {
+          this.logger.warn("Unable to remove client ".concat(clientId, " from session, not in a session"));
+          return;
+        }
+
+        var sessionClientMap = this.sessionClientMap;
+        var socket = sessionClientMap.get(clientId);
+
+        if (typeof socket === 'undefined') {
+          this.logger.warn("Unable to remove client ".concat(clientId, ", client not in session ").concat(sessionId));
+          return;
+        }
+
+        var userId = socket.userId,
+            socketId = socket.socketId,
+            serverId = socket.serverId;
+
+        if (this.userId !== userId) {
+          this.preApprovedSessionUserIdSet.delete(userId);
+        }
+
+        yield this.publish(_constants.REMOVE_FROM_SESSION, {
+          userId: userId,
+          socketId: socketId,
+          serverId: serverId
+        }, {
+          CustomError: _errors.RemoveFromSessionError
+        });
+      });
+
+      function removeFromSession(_x11) {
+        return _removeFromSession.apply(this, arguments);
+      }
+
+      return removeFromSession;
+    }()
+  }, {
     key: "inviteToSession",
     value: function () {
       var _inviteToSession = _asyncToGenerator(function* (userId) {
@@ -1242,6 +1288,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         var sessionId = this.sessionId || globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
 
         if (hasSessionId) {
+          this.preApprovedSessionUserIdSet.add(userId);
           yield this.publish(_constants.INVITE_TO_SESSION, {
             userId: userId,
             sessionId: sessionId,
@@ -1250,25 +1297,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             CustomError: _errors.InviteToSessionError
           });
         } else {
-          var automaticSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref9 = _asyncToGenerator(function* (values) {
-              if (values.userId === userId) {
-                return [true, 200, 'Authorized'];
-              }
-
-              if (typeof sessionJoinHandler === 'function') {
-                return sessionJoinHandler(values);
-              }
-
-              return [true, 200, 'Authorized'];
-            });
-
-            return function automaticSessionJoinHandler(_x12) {
-              return _ref9.apply(this, arguments);
-            };
-          }();
-
-          yield this.startSession(sessionId, automaticSessionJoinHandler);
+          yield this.startSession(sessionId, sessionJoinHandler);
+          this.preApprovedSessionUserIdSet.add(userId);
           yield this.publish(_constants.INVITE_TO_SESSION, {
             userId: userId,
             sessionId: sessionId,
@@ -1296,7 +1326,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var leaveSession = /*#__PURE__*/function () {
-            var _ref10 = _asyncToGenerator(function* () {
+            var _ref9 = _asyncToGenerator(function* () {
               if (hasSessionId) {
                 return;
               }
@@ -1311,7 +1341,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function leaveSession() {
-              return _ref10.apply(this, arguments);
+              return _ref9.apply(this, arguments);
             };
           }();
 
@@ -1336,7 +1366,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
 
           var handleSocketLeave = /*#__PURE__*/function () {
-            var _ref12 = _asyncToGenerator(function* (socket) {
+            var _ref11 = _asyncToGenerator(function* (socket) {
               if (socket.userId !== _this6.userId) {
                 return;
               }
@@ -1374,7 +1404,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleSocketLeave(_x13) {
-              return _ref12.apply(this, arguments);
+              return _ref11.apply(this, arguments);
             };
           }();
 
@@ -1393,19 +1423,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref13 = _asyncToGenerator(function* () {
+            var _ref12 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref13.apply(this, arguments);
+              return _ref12.apply(this, arguments);
             };
           }();
 
           var handleLeave = /*#__PURE__*/function () {
-            var _ref14 = _asyncToGenerator(function* (peerUserId) {
+            var _ref13 = _asyncToGenerator(function* (peerUserId) {
               if (userId !== peerUserId) {
                 return;
               }
@@ -1416,7 +1446,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleLeave(_x14) {
-              return _ref14.apply(this, arguments);
+              return _ref13.apply(this, arguments);
             };
           }();
 
@@ -1436,7 +1466,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function inviteToSession(_x11) {
+      function inviteToSession(_x12) {
         return _inviteToSession.apply(this, arguments);
       }
 
@@ -1448,6 +1478,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       var _startSession = _asyncToGenerator(function* (sessionId, sessionJoinHandler) {
         var _this7 = this;
 
+        this.preApprovedSessionUserIdSet.clear();
         var previousStartedSessionId = this.startedSessionId;
         this.startedSessionId = sessionId;
 
@@ -1467,7 +1498,29 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         delete this.joinedSessionId;
 
         if (typeof sessionJoinHandler === 'function') {
-          this.sessionJoinHandlerMap.set(sessionId, sessionJoinHandler);
+          var wrappedSessionJoinHandler = /*#__PURE__*/function () {
+            var _ref14 = _asyncToGenerator(function* (values) {
+              if (_this7.preApprovedSessionUserIdSet.has(values.userId)) {
+                return [true, 200, 'Authorized'];
+              }
+
+              if (_this7.userId === values.userId) {
+                return [true, 200, 'Authorized'];
+              }
+
+              if (typeof sessionJoinHandler === 'function') {
+                return sessionJoinHandler(values);
+              }
+
+              return [true, 200, 'Authorized'];
+            });
+
+            return function wrappedSessionJoinHandler(_x17) {
+              return _ref14.apply(this, arguments);
+            };
+          }();
+
+          this.sessionJoinHandlerMap.set(sessionId, wrappedSessionJoinHandler);
         } else {
           this.sessionJoinHandlerMap.set(sessionId, function () {
             return [true, 200, 'Authorized'];
@@ -1522,7 +1575,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function joinSession(_x17) {
+      function joinSession(_x18) {
         return _joinSession.apply(this, arguments);
       }
 
@@ -1837,7 +1890,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function handleMessage(_x18) {
+      function handleMessage(_x19) {
         return _handleMessage.apply(this, arguments);
       }
 
@@ -1927,7 +1980,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function getConnectedPeer(_x19) {
+      function getConnectedPeer(_x20) {
         return _getConnectedPeer.apply(this, arguments);
       }
 
@@ -2057,7 +2110,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         handleDataPublish(this.data.dump());
       });
 
-      function handleSessionClientJoin(_x20) {
+      function handleSessionClientJoin(_x21) {
         return _handleSessionClientJoin.apply(this, arguments);
       }
 
@@ -2078,32 +2131,34 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     }
   }, {
     key: "close",
-    value: function close() {
-      var _this13 = this;
+    value: function () {
+      var _close = _asyncToGenerator(function* () {
+        this.reset();
+        this.active = false;
 
-      this.reset();
-      this.active = false;
-      this.onIdle().catch(function (error) {
-        _this13.logger.error('Error in queue during close');
+        try {
+          yield this.onIdle();
+        } catch (error) {
+          this.logger.error('Error in queue during close');
+          this.logger.errorStack(error);
+        }
 
-        _this13.logger.errorStack(error);
-      }).finally(function () {
-        _this13.braidClient.data.removeListener('set', _this13.handleBraidSet);
-
-        _this13.braidClient.removeListener('close', _this13.handleBraidClose);
-
-        _this13.braidClient.removeListener('closeRequested', _this13.handleBraidCloseRequested);
-
-        _this13.braidClient.removeListener('reconnect', _this13.handleBraidReconnect);
-
-        _this13.braidClient.stopPublishing(_this13.publishName);
-
-        _this13.braidClient.removeServerEventListener(_this13.name);
-
-        _this13.braidClient.unsubscribe(_this13.name);
+        this.braidClient.data.removeListener('set', this.handleBraidSet);
+        this.braidClient.removeListener('close', this.handleBraidClose);
+        this.braidClient.removeListener('closeRequested', this.handleBraidCloseRequested);
+        this.braidClient.removeListener('reconnect', this.handleBraidReconnect);
+        this.braidClient.stopPublishing(this.publishName);
+        this.braidClient.removeServerEventListener(this.name);
+        this.braidClient.unsubscribe(this.name);
+        this.emit('close');
       });
-      this.emit('close');
-    }
+
+      function close() {
+        return _close.apply(this, arguments);
+      }
+
+      return close;
+    }()
   }]);
 
   return Bond;

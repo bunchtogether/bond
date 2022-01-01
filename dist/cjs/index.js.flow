@@ -20,6 +20,7 @@ import {
   ABORT_SESSION_JOIN_REQUEST,
   SESSION_JOIN_REQUEST,
   SESSION_JOIN_RESPONSE,
+  REMOVE_FROM_SESSION,
   RESPONSE,
 } from './constants';
 import {
@@ -37,6 +38,7 @@ import {
   InvitedUserLeftError,
   InvitationTimeoutError,
   DeclineInviteToSessionError,
+  RemoveFromSessionError,
 } from './errors';
 import {
   Ping,
@@ -141,6 +143,7 @@ export class Bond extends EventEmitter {
   declare data: ObservedRemoveMap<string | number, any>;
   declare sessionClientOffsetMap: Map<number, number>;
   declare leaveSessionAfterLastClientTimeout: void | TimeoutID;
+  declare preApprovedSessionUserIdSet: Set<string>;
 
   constructor(braidClient: BraidClient, roomId:string, userId:string, options?: Options = {}) {
     super();
@@ -169,6 +172,7 @@ export class Bond extends EventEmitter {
     this.sessionJoinRequestMap = new Map();
     this.data = new ObservedRemoveMap([], { bufferPublishing: 0 });
     this.sessionClientOffsetMap = new Map();
+    this.preApprovedSessionUserIdSet = new Set();
     this.addListener('sessionClientJoin', this.handleSessionClientJoin.bind(this));
     this._ready = this.init(); // eslint-disable-line no-underscore-dangle
     if (typeof options.sessionId === 'string') {
@@ -372,18 +376,20 @@ export class Bond extends EventEmitter {
     this.braidClient.addListener('reconnect', this.handleBraidReconnect);
   }
 
-  get sessionClientIds():Set<number> {
+  get sessionClientMap():Map<number, Socket> {
     const sessionId = this.sessionId;
     if (typeof sessionId !== 'string') {
-      return new Set();
+      return new Map();
     }
     const sessionClientMap = this.sessionMap.get(sessionId);
     if (typeof sessionClientMap === 'undefined') {
-      return new Set();
+      return new Map();
     }
-    const clientIds = new Set(sessionClientMap.keys());
-    clientIds.delete(this.clientId);
-    return clientIds;
+    return sessionClientMap;
+  }
+
+  get sessionClientIds():Set<number> {
+    return new Set(this.sessionClientMap.keys());
   }
 
   async init() {
@@ -700,6 +706,25 @@ export class Bond extends EventEmitter {
     return this.startedSessionId === this.sessionId;
   }
 
+  async removeFromSession(clientId:number) {
+    const sessionId = this.sessionId;
+    if (sessionId === false) {
+      this.logger.warn(`Unable to remove client ${clientId} from session, not in a session`);
+      return;
+    }
+    const sessionClientMap = this.sessionClientMap;
+    const socket = sessionClientMap.get(clientId);
+    if (typeof socket === 'undefined') {
+      this.logger.warn(`Unable to remove client ${clientId}, client not in session ${sessionId}`);
+      return;
+    }
+    const { userId, socketId, serverId } = socket;
+    if (this.userId !== userId) {
+      this.preApprovedSessionUserIdSet.delete(userId);
+    }
+    await this.publish(REMOVE_FROM_SESSION, { userId, socketId, serverId }, { CustomError: RemoveFromSessionError });
+  }
+
   async inviteToSession(userId:string, options?:{ data?:Object, timeoutDuration?: number, sessionJoinHandler?: SessionJoinHandler } = {}) {
     const { data, timeoutDuration = 30000, sessionJoinHandler } = options;
     const queue = this.queueMap.get(SESSION_QUEUE);
@@ -710,18 +735,11 @@ export class Bond extends EventEmitter {
     // $FlowFixMe
     const sessionId = this.sessionId || globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
     if (hasSessionId) {
+      this.preApprovedSessionUserIdSet.add(userId);
       await this.publish(INVITE_TO_SESSION, { userId, sessionId, data }, { CustomError: InviteToSessionError });
     } else {
-      const automaticSessionJoinHandler = async (values) => {
-        if (values.userId === userId) {
-          return [true, 200, 'Authorized'];
-        }
-        if (typeof sessionJoinHandler === 'function') {
-          return sessionJoinHandler(values);
-        }
-        return [true, 200, 'Authorized'];
-      };
-      await this.startSession(sessionId, automaticSessionJoinHandler);
+      await this.startSession(sessionId, sessionJoinHandler);
+      this.preApprovedSessionUserIdSet.add(userId);
       await this.publish(INVITE_TO_SESSION, { userId, sessionId, data }, { CustomError: InviteToSessionError });
     }
     await new Promise((resolve, reject) => {
@@ -817,6 +835,7 @@ export class Bond extends EventEmitter {
   }
 
   async startSession(sessionId:string, sessionJoinHandler?: SessionJoinHandler) {
+    this.preApprovedSessionUserIdSet.clear();
     const previousStartedSessionId = this.startedSessionId;
     this.startedSessionId = sessionId;
     try {
@@ -827,7 +846,19 @@ export class Bond extends EventEmitter {
     }
     delete this.joinedSessionId;
     if (typeof sessionJoinHandler === 'function') {
-      this.sessionJoinHandlerMap.set(sessionId, sessionJoinHandler);
+      const wrappedSessionJoinHandler = async (values) => {
+        if (this.preApprovedSessionUserIdSet.has(values.userId)) {
+          return [true, 200, 'Authorized'];
+        }
+        if (this.userId === values.userId) {
+          return [true, 200, 'Authorized'];
+        }
+        if (typeof sessionJoinHandler === 'function') {
+          return sessionJoinHandler(values);
+        }
+        return [true, 200, 'Authorized'];
+      };
+      this.sessionJoinHandlerMap.set(sessionId, wrappedSessionJoinHandler);
     } else {
       this.sessionJoinHandlerMap.set(sessionId, () => [true, 200, 'Authorized']);
     }
@@ -1233,21 +1264,22 @@ export class Bond extends EventEmitter {
     this.handleBraidSet(this.name, []);
   }
 
-  close() {
+  async close() {
     this.reset();
     this.active = false;
-    this.onIdle().catch((error) => {
+    try {
+      await this.onIdle();
+    } catch (error) {
       this.logger.error('Error in queue during close');
       this.logger.errorStack(error);
-    }).finally(() => {
-      this.braidClient.data.removeListener('set', this.handleBraidSet);
-      this.braidClient.removeListener('close', this.handleBraidClose);
-      this.braidClient.removeListener('closeRequested', this.handleBraidCloseRequested);
-      this.braidClient.removeListener('reconnect', this.handleBraidReconnect);
-      this.braidClient.stopPublishing(this.publishName);
-      this.braidClient.removeServerEventListener(this.name);
-      this.braidClient.unsubscribe(this.name);
-    });
+    }
+    this.braidClient.data.removeListener('set', this.handleBraidSet);
+    this.braidClient.removeListener('close', this.handleBraidClose);
+    this.braidClient.removeListener('closeRequested', this.handleBraidCloseRequested);
+    this.braidClient.removeListener('reconnect', this.handleBraidReconnect);
+    this.braidClient.stopPublishing(this.publishName);
+    this.braidClient.removeServerEventListener(this.name);
+    this.braidClient.unsubscribe(this.name);
     this.emit('close');
   }
 }

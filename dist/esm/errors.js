@@ -98,4 +98,11 @@ export class DeclineInviteToSessionError extends RequestError {
   }
 
 }
+export class RemoveFromSessionError extends RequestError {
+  constructor(message, code) {
+    super(message, code);
+    this.name = 'RemoveFromSessionError';
+  }
+
+}
 //# sourceMappingURL=errors.js.map
