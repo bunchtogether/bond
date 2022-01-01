@@ -1418,21 +1418,28 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(new _errors.InvitationTimeoutError("Invitation timed out after ".concat(Math.round(timeoutDuration / 100) / 10, " seconds")));
           }), timeoutDuration);
 
-          var handleCancelInvite = function handleCancelInvite(_ref12) {
-            var cancelledSessionId = _ref12.sessionId,
-                cancelledUserId = _ref12.userId;
+          var handleCancelInvite = /*#__PURE__*/function () {
+            var _ref13 = _asyncToGenerator(function* (_ref12) {
+              var cancelledSessionId = _ref12.sessionId,
+                  cancelledUserId = _ref12.userId;
 
-            if (cancelledSessionId !== sessionId) {
-              return;
-            }
+              if (cancelledSessionId !== sessionId) {
+                return;
+              }
 
-            if (cancelledUserId !== userId) {
-              return;
-            }
+              if (cancelledUserId !== userId) {
+                return;
+              }
 
-            cleanup();
-            reject(new _errors.InvitationCancelledError("Invitation to user ".concat(userId, " was cancelled")));
-          };
+              cleanup();
+              yield leaveSession();
+              reject(new _errors.InvitationCancelledError("Invitation to user ".concat(userId, " was cancelled")));
+            });
+
+            return function handleCancelInvite(_x14) {
+              return _ref13.apply(this, arguments);
+            };
+          }();
 
           var handleSessionJoin = function handleSessionJoin(socket) {
             if (socket.sessionId !== sessionId) {
@@ -1449,7 +1456,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
 
           var handleSocketLeave = /*#__PURE__*/function () {
-            var _ref13 = _asyncToGenerator(function* (socket) {
+            var _ref14 = _asyncToGenerator(function* (socket) {
               if (socket.userId !== _this6.userId) {
                 return;
               }
@@ -1486,8 +1493,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSocketLeave(_x14) {
-              return _ref13.apply(this, arguments);
+            return function handleSocketLeave(_x15) {
+              return _ref14.apply(this, arguments);
             };
           }();
 
@@ -1506,19 +1513,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref14 = _asyncToGenerator(function* () {
+            var _ref15 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref14.apply(this, arguments);
+              return _ref15.apply(this, arguments);
             };
           }();
 
           var handleLeave = /*#__PURE__*/function () {
-            var _ref15 = _asyncToGenerator(function* (peerUserId) {
+            var _ref16 = _asyncToGenerator(function* (peerUserId) {
               if (userId !== peerUserId) {
                 return;
               }
@@ -1528,8 +1535,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               reject(new _errors.InvitedUserLeftError("User ".concat(userId, " left before accepting the invitation")));
             });
 
-            return function handleLeave(_x15) {
-              return _ref15.apply(this, arguments);
+            return function handleLeave(_x16) {
+              return _ref16.apply(this, arguments);
             };
           }();
 
@@ -1584,7 +1591,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (typeof sessionJoinHandler === 'function') {
           var wrappedSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref16 = _asyncToGenerator(function* (values) {
+            var _ref17 = _asyncToGenerator(function* (values) {
               if (_this7.preApprovedSessionUserIdSet.has(values.userId)) {
                 return [true, 200, 'Authorized'];
               }
@@ -1600,8 +1607,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return [true, 200, 'Authorized'];
             });
 
-            return function wrappedSessionJoinHandler(_x18) {
-              return _ref16.apply(this, arguments);
+            return function wrappedSessionJoinHandler(_x19) {
+              return _ref17.apply(this, arguments);
             };
           }();
 
@@ -1613,7 +1620,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function startSession(_x16, _x17) {
+      function startSession(_x17, _x18) {
         return _startSession.apply(this, arguments);
       }
 
@@ -1641,10 +1648,10 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         try {
           yield this.addToQueue(_constants.SESSION_QUEUE, function () {
             return _this8.publish(_constants.JOIN_SESSION, {
-              sessionId: sessionId,
-              timeoutDuration: timeoutDuration
+              sessionId: sessionId
             }, {
-              CustomError: _errors.JoinSessionError
+              CustomError: _errors.JoinSessionError,
+              timeoutDuration: timeoutDuration
             });
           });
         } catch (error) {
@@ -1660,7 +1667,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function joinSession(_x19) {
+      function joinSession(_x20) {
         return _joinSession.apply(this, arguments);
       }
 
@@ -1975,7 +1982,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function handleMessage(_x20) {
+      function handleMessage(_x21) {
         return _handleMessage.apply(this, arguments);
       }
 
@@ -2021,9 +2028,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref18) {
-            var newClientId = _ref18.clientId,
-                _p = _ref18.peer;
+          var handlePeer = function handlePeer(_ref19) {
+            var newClientId = _ref19.clientId,
+                _p = _ref19.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2036,9 +2043,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref19) {
-            var newClientId = _ref19.clientId,
-                _p = _ref19.peer;
+          var handleConnect = function handleConnect(_ref20) {
+            var newClientId = _ref20.clientId,
+                _p = _ref20.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2065,7 +2072,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function getConnectedPeer(_x21) {
+      function getConnectedPeer(_x22) {
         return _getConnectedPeer.apply(this, arguments);
       }
 
@@ -2148,8 +2155,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (!this.isConnectedToClient(clientId)) {
           yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref20) {
-              var newClientId = _ref20.clientId;
+            var handleConnect = function handleConnect(_ref21) {
+              var newClientId = _ref21.clientId;
 
               if (newClientId !== clientId) {
                 return;
@@ -2195,7 +2202,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         handleDataPublish(this.data.dump());
       });
 
-      function handleSessionClientJoin(_x22) {
+      function handleSessionClientJoin(_x23) {
         return _handleSessionClientJoin.apply(this, arguments);
       }
 

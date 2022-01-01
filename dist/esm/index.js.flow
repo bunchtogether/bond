@@ -808,7 +808,7 @@ export class Bond extends EventEmitter {
         await leaveSession();
         reject(new InvitationTimeoutError(`Invitation timed out after ${Math.round(timeoutDuration / 100) / 10} seconds`));
       }, timeoutDuration);
-      const handleCancelInvite = ({ sessionId: cancelledSessionId, userId: cancelledUserId }:{ sessionId:string, userId:string }) => {
+      const handleCancelInvite = async ({ sessionId: cancelledSessionId, userId: cancelledUserId }:{ sessionId:string, userId:string }) => {
         if (cancelledSessionId !== sessionId) {
           return;
         }
@@ -816,6 +816,7 @@ export class Bond extends EventEmitter {
           return;
         }
         cleanup();
+        await leaveSession();
         reject(new InvitationCancelledError(`Invitation to user ${userId} was cancelled`));
       };
       const handleSessionJoin = (socket: Socket) => {
@@ -926,7 +927,7 @@ export class Bond extends EventEmitter {
     const previousJoinedSessionId = this.joinedSessionId;
     this.joinedSessionId = sessionId;
     try {
-      await this.addToQueue(SESSION_QUEUE, () => this.publish(JOIN_SESSION, { sessionId, timeoutDuration }, { CustomError: JoinSessionError }));
+      await this.addToQueue(SESSION_QUEUE, () => this.publish(JOIN_SESSION, { sessionId }, { CustomError: JoinSessionError, timeoutDuration }));
     } catch (error) {
       this.joinedSessionId = previousJoinedSessionId;
       throw error;
