@@ -100,6 +100,7 @@ export class Bond extends EventEmitter {
     });
     this.sessionClientOffsetMap = new Map();
     this.preApprovedSessionUserIdSet = new Set();
+    this.peerAddTrackHandlerMap = new Map();
     this.addListener('sessionClientJoin', this.handleSessionClientJoin.bind(this));
     this._ready = this.init(); // eslint-disable-line no-underscore-dangle
 
@@ -763,11 +764,26 @@ export class Bond extends EventEmitter {
 
   async addStream(clientId, stream) {
     const peer = await this.getConnectedPeer(clientId);
+
+    const addTrackHandler = event => {
+      if (event instanceof MediaStreamTrackEvent) {
+        peer.addTrack(event.track);
+      }
+    };
+
+    this.peerAddTrackHandlerMap.set(stream, addTrackHandler);
+    stream.addEventListener('addtrack', addTrackHandler);
     peer.addStream(stream);
   }
 
   async removeStream(clientId, stream) {
     const peer = await this.getConnectedPeer(clientId);
+    const addTrackHandler = this.peerAddTrackHandlerMap.get(stream);
+
+    if (typeof addTrackHandler === 'function') {
+      stream.removeEventListener('addtrack', addTrackHandler);
+    }
+
     peer.removeStream(stream);
   }
 

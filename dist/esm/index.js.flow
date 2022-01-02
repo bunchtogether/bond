@@ -148,6 +148,7 @@ export class Bond extends EventEmitter {
   declare sessionClientOffsetMap: Map<number, number>;
   declare leaveSessionAfterLastClientTimeout: void | TimeoutID;
   declare preApprovedSessionUserIdSet: Set<string>;
+  declare peerAddTrackHandlerMap: Map<Object, (Event) => void>;
 
   constructor(braidClient: BraidClient, roomId:string, userId:string, options?: Options = {}) {
     super();
@@ -177,6 +178,7 @@ export class Bond extends EventEmitter {
     this.data = new ObservedRemoveMap([], { bufferPublishing: 0 });
     this.sessionClientOffsetMap = new Map();
     this.preApprovedSessionUserIdSet = new Set();
+    this.peerAddTrackHandlerMap = new Map();
     this.addListener('sessionClientJoin', this.handleSessionClientJoin.bind(this));
     this._ready = this.init(); // eslint-disable-line no-underscore-dangle
     if (typeof options.sessionId === 'string') {
@@ -676,11 +678,22 @@ export class Bond extends EventEmitter {
 
   async addStream(clientId:number, stream:MediaStream) {
     const peer = await this.getConnectedPeer(clientId);
+    const addTrackHandler = (event:Event) => {
+      if (event instanceof MediaStreamTrackEvent) {
+        peer.addTrack(event.track);
+      }
+    };
+    this.peerAddTrackHandlerMap.set(stream, addTrackHandler);
+    stream.addEventListener('addtrack', addTrackHandler);
     peer.addStream(stream);
   }
 
   async removeStream(clientId:number, stream:MediaStream) {
     const peer = await this.getConnectedPeer(clientId);
+    const addTrackHandler = this.peerAddTrackHandlerMap.get(stream);
+    if (typeof addTrackHandler === 'function') {
+      stream.removeEventListener('addtrack', addTrackHandler);
+    }
     peer.removeStream(stream);
   }
 

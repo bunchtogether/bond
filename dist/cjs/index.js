@@ -187,6 +187,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     });
     _this.sessionClientOffsetMap = new Map();
     _this.preApprovedSessionUserIdSet = new Set();
+    _this.peerAddTrackHandlerMap = new Map();
 
     _this.addListener('sessionClientJoin', _this.handleSessionClientJoin.bind(_assertThisInitialized(_this)));
 
@@ -1139,6 +1140,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     value: function () {
       var _addStream = _asyncToGenerator(function* (clientId, stream) {
         var peer = yield this.getConnectedPeer(clientId);
+
+        var addTrackHandler = function addTrackHandler(event) {
+          if (event instanceof MediaStreamTrackEvent) {
+            peer.addTrack(event.track);
+          }
+        };
+
+        this.peerAddTrackHandlerMap.set(stream, addTrackHandler);
+        stream.addEventListener('addtrack', addTrackHandler);
         peer.addStream(stream);
       });
 
@@ -1153,6 +1163,12 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     value: function () {
       var _removeStream = _asyncToGenerator(function* (clientId, stream) {
         var peer = yield this.getConnectedPeer(clientId);
+        var addTrackHandler = this.peerAddTrackHandlerMap.get(stream);
+
+        if (typeof addTrackHandler === 'function') {
+          stream.removeEventListener('addtrack', addTrackHandler);
+        }
+
         peer.removeStream(stream);
       });
 
