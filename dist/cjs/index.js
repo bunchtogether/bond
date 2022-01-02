@@ -1648,10 +1648,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         try {
           yield this.addToQueue(_constants.SESSION_QUEUE, function () {
             return _this8.publish(_constants.JOIN_SESSION, {
-              sessionId: sessionId
+              sessionId: sessionId,
+              timeoutDuration: timeoutDuration
             }, {
               CustomError: _errors.JoinSessionError,
-              timeoutDuration: timeoutDuration
+              timeoutDuration: timeoutDuration + 5000
             });
           });
         } catch (error) {

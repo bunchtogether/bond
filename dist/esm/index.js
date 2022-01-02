@@ -1118,10 +1118,11 @@ export class Bond extends EventEmitter {
 
     try {
       await this.addToQueue(SESSION_QUEUE, () => this.publish(JOIN_SESSION, {
-        sessionId
+        sessionId,
+        timeoutDuration
       }, {
         CustomError: JoinSessionError,
-        timeoutDuration
+        timeoutDuration: timeoutDuration + 5000
       }));
     } catch (error) {
       this.joinedSessionId = previousJoinedSessionId;
