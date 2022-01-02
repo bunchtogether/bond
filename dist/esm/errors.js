@@ -119,4 +119,11 @@ export class RemoveFromSessionError extends RequestError {
   }
 
 }
+export class AbortSessionJoinError extends RequestError {
+  constructor(message, code) {
+    super(message, code);
+    this.name = 'AbortSessionJoinError';
+  }
+
+}
 //# sourceMappingURL=errors.js.map

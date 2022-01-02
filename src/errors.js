@@ -123,3 +123,10 @@ export class RemoveFromSessionError extends RequestError {
   }
 }
 
+export class AbortSessionJoinError extends RequestError {
+  constructor(message:string, code:number) {
+    super(message, code);
+    this.name = 'AbortSessionJoinError';
+  }
+}
+

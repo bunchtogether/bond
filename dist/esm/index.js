@@ -6,7 +6,7 @@ import SimplePeer from 'simple-peer';
 import PQueue from 'p-queue';
 import { pack, unpack } from 'msgpackr';
 import { SIGNAL, START_SESSION, LEAVE_SESSION, JOIN_SESSION, INVITE_TO_SESSION, DECLINE_INVITE_TO_SESSION, SESSION_QUEUE, ABORT_SESSION_JOIN_REQUEST, SESSION_JOIN_REQUEST, SESSION_JOIN_RESPONSE, REMOVE_FROM_SESSION, CANCEL_INVITE_TO_SESSION, RESPONSE } from './constants';
-import { AbortError, RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError, InviteToSessionError, InvitationDeclinedError, InvitedUserLeftError, InvitationTimeoutError, DeclineInviteToSessionError, RemoveFromSessionError, CancelInviteToSessionError, InvitationCancelledError } from './errors';
+import { AbortError, RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError, InviteToSessionError, InvitationDeclinedError, InvitedUserLeftError, InvitationTimeoutError, DeclineInviteToSessionError, RemoveFromSessionError, CancelInviteToSessionError, InvitationCancelledError, AbortSessionJoinError } from './errors';
 import { Ping, Pong, ObservedRemoveDump } from './messagepack';
 
 const getSocketMap = values => {
@@ -1135,6 +1135,12 @@ export class Bond extends EventEmitter {
     if (typeof startedSessionId === 'string') {
       this.sessionJoinHandlerMap.delete(startedSessionId);
     }
+  }
+
+  async abortJoinSession() {
+    await this.publish(ABORT_SESSION_JOIN_REQUEST, {}, {
+      CustomError: AbortSessionJoinError
+    });
   }
 
   async leaveSession() {

@@ -42,6 +42,7 @@ import {
   RemoveFromSessionError,
   CancelInviteToSessionError,
   InvitationCancelledError,
+  AbortSessionJoinError,
 } from './errors';
 import {
   Ping,
@@ -937,6 +938,10 @@ export class Bond extends EventEmitter {
     if (typeof startedSessionId === 'string') {
       this.sessionJoinHandlerMap.delete(startedSessionId);
     }
+  }
+
+  async abortJoinSession() {
+    await this.publish(ABORT_SESSION_JOIN_REQUEST, { }, { CustomError: AbortSessionJoinError });
   }
 
   async leaveSession() {

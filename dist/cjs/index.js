@@ -1675,6 +1675,21 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       return joinSession;
     }()
   }, {
+    key: "abortJoinSession",
+    value: function () {
+      var _abortJoinSession = _asyncToGenerator(function* () {
+        yield this.publish(_constants.ABORT_SESSION_JOIN_REQUEST, {}, {
+          CustomError: _errors.AbortSessionJoinError
+        });
+      });
+
+      function abortJoinSession() {
+        return _abortJoinSession.apply(this, arguments);
+      }
+
+      return abortJoinSession;
+    }()
+  }, {
     key: "leaveSession",
     value: function () {
       var _leaveSession = _asyncToGenerator(function* () {

@@ -5,7 +5,7 @@ function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" =
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.RemoveFromSessionError = exports.LeaveSessionError = exports.JoinSessionError = exports.InvitedUserLeftError = exports.InviteToSessionError = exports.InvitationTimeoutError = exports.InvitationDeclinedError = exports.InvitationCancelledError = exports.DeclineInviteToSessionError = exports.ClientClosedError = exports.CancelInviteToSessionError = exports.AbortError = void 0;
+exports.StartSessionError = exports.SignalError = exports.SessionJoinResponseError = exports.RequestTimeoutError = exports.RequestError = exports.RemoveFromSessionError = exports.LeaveSessionError = exports.JoinSessionError = exports.InvitedUserLeftError = exports.InviteToSessionError = exports.InvitationTimeoutError = exports.InvitationDeclinedError = exports.InvitationCancelledError = exports.DeclineInviteToSessionError = exports.ClientClosedError = exports.CancelInviteToSessionError = exports.AbortSessionJoinError = exports.AbortError = void 0;
 
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
@@ -374,4 +374,24 @@ var RemoveFromSessionError = /*#__PURE__*/function (_RequestError9) {
 }(RequestError);
 
 exports.RemoveFromSessionError = RemoveFromSessionError;
+
+var AbortSessionJoinError = /*#__PURE__*/function (_RequestError10) {
+  _inherits(AbortSessionJoinError, _RequestError10);
+
+  var _super18 = _createSuper(AbortSessionJoinError);
+
+  function AbortSessionJoinError(message, code) {
+    var _this18;
+
+    _classCallCheck(this, AbortSessionJoinError);
+
+    _this18 = _super18.call(this, message, code);
+    _this18.name = 'AbortSessionJoinError';
+    return _this18;
+  }
+
+  return _createClass(AbortSessionJoinError);
+}(RequestError);
+
+exports.AbortSessionJoinError = AbortSessionJoinError;
 //# sourceMappingURL=errors.js.map
