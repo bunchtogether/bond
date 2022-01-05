@@ -1043,9 +1043,16 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
                   CustomError: _errors.SignalError
                 });
               } catch (error) {
-                _this5.logger.error("Unable to signal user ".concat(userId, " client ").concat(clientId, " closed"));
+                if (error instanceof _errors.SignalError && error.code === 404) {
+                  _this5.logger.error("Unable to signal user ".concat(userId, ", client ").concat(clientId, ", client does not exist"));
 
-                _this5.logger.errorStack(error);
+                  cleanup();
+                  resolve();
+                } else {
+                  _this5.logger.error("Unable to signal user ".concat(userId, ", client ").concat(clientId));
+
+                  _this5.logger.errorStack(error);
+                }
               }
             });
 

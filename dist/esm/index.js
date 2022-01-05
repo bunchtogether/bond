@@ -695,8 +695,14 @@ export class Bond extends EventEmitter {
             CustomError: SignalError
           });
         } catch (error) {
-          this.logger.error(`Unable to signal user ${userId} client ${clientId} closed`);
-          this.logger.errorStack(error);
+          if (error instanceof SignalError && error.code === 404) {
+            this.logger.error(`Unable to signal user ${userId}, client ${clientId}, client does not exist`);
+            cleanup();
+            resolve();
+          } else {
+            this.logger.error(`Unable to signal user ${userId}, client ${clientId}`);
+            this.logger.errorStack(error);
+          }
         }
       };
 
