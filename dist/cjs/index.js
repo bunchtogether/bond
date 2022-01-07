@@ -164,6 +164,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     _this.userId = userId;
     _this.roomId = roomId;
     _this.sessionId = false;
+    _this.localConnectionsOnly = !!options.localConnectionsOnly;
     var name = "signal/".concat(_this.roomId);
     _this.name = name;
     _this.publishName = "signal/".concat(_this.roomId, "/").concat(_this.clientId.toString(36));
@@ -271,11 +272,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       }), 5000);
     }));
 
-    _this.addListener('session', /*#__PURE__*/_asyncToGenerator(function* () {
+    _this.addListener('session', function () {
       _this.data.clear();
 
       _this.sessionClientOffsetMap.clear();
-    }));
+    });
 
     _this.handleBraidSet = function (key, values) {
       if (key !== name) {
@@ -847,8 +848,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               resolve();
             };
 
-            var handleSocketLeave = function handleSocketLeave(_ref4) {
-              var oldSocketHash = _ref4.socketHash;
+            var handleSocketLeave = function handleSocketLeave(_ref3) {
+              var oldSocketHash = _ref3.socketHash;
 
               if (socketHash !== oldSocketHash) {
                 return;
@@ -877,6 +878,13 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         var options = Object.assign({}, {
           initiator: clientId > this.clientId
         }, this.peerOptions);
+
+        if (this.localConnectionsOnly) {
+          options.config = {
+            iceServers: []
+          };
+        }
+
         var peer = existingPeer || new _simplePeer.default(options);
         this.peerMap.set(clientId, peer);
         this.peerReconnectMap.set(clientId, reconnectCount + 1);
@@ -897,7 +905,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref5 = _asyncToGenerator(function* (data) {
+            var _ref4 = _asyncToGenerator(function* (data) {
               try {
                 yield _this5.publish(_constants.SIGNAL, {
                   serverId: serverId,
@@ -914,7 +922,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleSignal(_x4) {
-              return _ref5.apply(this, arguments);
+              return _ref4.apply(this, arguments);
             };
           }();
 
@@ -994,6 +1002,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             clientId: clientId,
             serverId: serverId,
             socketId: socketId,
+            socketHash: socketHash,
             peer: peer
           });
           return;
@@ -1026,6 +1035,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               clientId: clientId,
               serverId: serverId,
               socketId: socketId,
+              socketHash: socketHash,
               peer: peer
             });
 
@@ -1033,7 +1043,20 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref6 = _asyncToGenerator(function* (data) {
+            var _ref5 = _asyncToGenerator(function* (data) {
+              if (_this5.localConnectionsOnly) {
+                if (data.type === 'candidate') {
+                  var candidate = data.candidate.candidate;
+                  var address = candidate.split(' ')[4];
+
+                  if (address !== '127.0.0.1' && address !== '::1') {
+                    return;
+                  }
+                } else if (data.type === 'answer' || data.type === 'offer') {
+                  data.sdp = data.sdp.replace(/a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s(?!(127\.0\.0\.1|::1)).*?\r\n/g, ''); // eslint-disable-line no-param-reassign
+                }
+              }
+
               try {
                 yield _this5.publish(_constants.SIGNAL, {
                   serverId: serverId,
@@ -1057,7 +1080,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleSignal(_x5) {
-              return _ref6.apply(this, arguments);
+              return _ref5.apply(this, arguments);
             };
           }();
 
@@ -1102,8 +1125,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             resolve();
           };
 
-          var handleSocketLeave = function handleSocketLeave(_ref7) {
-            var oldSocketHash = _ref7.socketHash;
+          var handleSocketLeave = function handleSocketLeave(_ref6) {
+            var oldSocketHash = _ref6.socketHash;
 
             if (socketHash !== oldSocketHash) {
               return;
@@ -1188,8 +1211,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "disconnectFromPeer",
     value: function () {
-      var _disconnectFromPeer = _asyncToGenerator(function* (_ref8) {
-        var clientId = _ref8.clientId;
+      var _disconnectFromPeer = _asyncToGenerator(function* (_ref7) {
+        var clientId = _ref7.clientId;
         var peer = this.peerMap.get(clientId);
 
         if (typeof peer === 'undefined') {
@@ -1347,9 +1370,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         var didCancel = false;
 
-        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref9) {
-          var cancelledSessionId = _ref9.sessionId,
-              cancelledUserId = _ref9.userId;
+        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref8) {
+          var cancelledSessionId = _ref8.sessionId,
+              cancelledUserId = _ref8.userId;
 
           if (cancelledSessionId !== sessionId) {
             return;
@@ -1363,7 +1386,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         };
 
         var leaveSession = /*#__PURE__*/function () {
-          var _ref10 = _asyncToGenerator(function* () {
+          var _ref9 = _asyncToGenerator(function* () {
             if (hasSessionId) {
               return;
             }
@@ -1378,7 +1401,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           });
 
           return function leaveSession() {
-            return _ref10.apply(this, arguments);
+            return _ref9.apply(this, arguments);
           };
         }();
 
@@ -1442,9 +1465,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           }), timeoutDuration);
 
           var handleCancelInvite = /*#__PURE__*/function () {
-            var _ref13 = _asyncToGenerator(function* (_ref12) {
-              var cancelledSessionId = _ref12.sessionId,
-                  cancelledUserId = _ref12.userId;
+            var _ref12 = _asyncToGenerator(function* (_ref11) {
+              var cancelledSessionId = _ref11.sessionId,
+                  cancelledUserId = _ref11.userId;
 
               if (cancelledSessionId !== sessionId) {
                 return;
@@ -1460,7 +1483,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleCancelInvite(_x14) {
-              return _ref13.apply(this, arguments);
+              return _ref12.apply(this, arguments);
             };
           }();
 
@@ -1479,7 +1502,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
 
           var handleSocketLeave = /*#__PURE__*/function () {
-            var _ref14 = _asyncToGenerator(function* (socket) {
+            var _ref13 = _asyncToGenerator(function* (socket) {
               if (socket.userId !== _this6.userId) {
                 return;
               }
@@ -1517,7 +1540,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleSocketLeave(_x15) {
-              return _ref14.apply(this, arguments);
+              return _ref13.apply(this, arguments);
             };
           }();
 
@@ -1536,19 +1559,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref15 = _asyncToGenerator(function* () {
+            var _ref14 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref15.apply(this, arguments);
+              return _ref14.apply(this, arguments);
             };
           }();
 
           var handleLeave = /*#__PURE__*/function () {
-            var _ref16 = _asyncToGenerator(function* (peerUserId) {
+            var _ref15 = _asyncToGenerator(function* (peerUserId) {
               if (userId !== peerUserId) {
                 return;
               }
@@ -1559,7 +1582,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleLeave(_x16) {
-              return _ref16.apply(this, arguments);
+              return _ref15.apply(this, arguments);
             };
           }();
 
@@ -1614,7 +1637,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (typeof sessionJoinHandler === 'function') {
           var wrappedSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref17 = _asyncToGenerator(function* (values) {
+            var _ref16 = _asyncToGenerator(function* (values) {
               if (_this7.preApprovedSessionUserIdSet.has(values.userId)) {
                 return [true, 200, 'Authorized'];
               }
@@ -1631,7 +1654,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function wrappedSessionJoinHandler(_x19) {
-              return _ref17.apply(this, arguments);
+              return _ref16.apply(this, arguments);
             };
           }();
 
@@ -2067,9 +2090,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref19) {
-            var newClientId = _ref19.clientId,
-                _p = _ref19.peer;
+          var handlePeer = function handlePeer(_ref18) {
+            var newClientId = _ref18.clientId,
+                _p = _ref18.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2082,9 +2105,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref20) {
-            var newClientId = _ref20.clientId,
-                _p = _ref20.peer;
+          var handleConnect = function handleConnect(_ref19) {
+            var newClientId = _ref19.clientId,
+                _p = _ref19.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2194,8 +2217,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (!this.isConnectedToClient(clientId)) {
           yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref21) {
-              var newClientId = _ref21.clientId;
+            var handleConnect = function handleConnect(_ref20) {
+              var newClientId = _ref20.clientId;
 
               if (newClientId !== clientId) {
                 return;
@@ -2299,6 +2322,8 @@ exports.Bond = Bond;
 
 _defineProperty(Bond, "declineInviteToSession", void 0);
 
+_defineProperty(Bond, "getLocalRoomId", void 0);
+
 var publish = function publish(braidClient, abortSignal, roomId, type, value) {
   var options = arguments.length > 5 && arguments[5] !== undefined ? arguments[5] : {};
   var name = "signal/".concat(roomId);
@@ -2377,4 +2402,158 @@ Bond.declineInviteToSession = function (braidClient, abortSignal, data) {
     CustomError: _errors.DeclineInviteToSessionError
   });
 };
+
+Bond.getLocalRoomId = /*#__PURE__*/function () {
+  var _ref21 = _asyncToGenerator(function* (braidClient, _roomId, userId, abortSignal) {
+    var options = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : {};
+    var bond = new Bond(braidClient, _constants.AUTOMATIC_DISCOVERY_ROOM_ID, userId, Object.assign({}, options, {
+      localConnectionsOnly: true
+    }));
+    var roomId = _roomId; // eslint-disable-line no-undef
+
+    var localKey = bond.clientId.toString(36);
+    var logger = options.logger || braidClient.logger;
+    var negotiatedRoomId = yield new Promise(function (resolve, reject) {
+      var handleSession = function handleSession() {
+        bond.data.set(localKey, roomId);
+      };
+
+      var handleConnect = function handleConnect(_ref22) {
+        var clientId = _ref22.clientId,
+            socketHash = _ref22.socketHash;
+        var socket = bond.socketMap.get(socketHash);
+
+        if (typeof socket === 'undefined') {
+          return;
+        }
+
+        var sessionId = socket.sessionId;
+
+        if (typeof sessionId !== 'string') {
+          return;
+        }
+
+        if (clientId > bond.clientId) {
+          bond.joinSession(sessionId).catch(function (error) {
+            logger.error('Unable to join session during automatic linking');
+            logger.errorStack(error);
+          });
+        }
+      };
+
+      var handleSessionJoin = function handleSessionJoin(_ref23) {
+        var clientId = _ref23.clientId,
+            sessionId = _ref23.sessionId;
+
+        if (bond.sessionId === sessionId) {
+          return;
+        }
+
+        if (!bond.isConnectedToClient(clientId)) {
+          return;
+        }
+
+        if (typeof sessionId !== 'string') {
+          return;
+        }
+
+        if (clientId > bond.clientId) {
+          bond.joinSession(sessionId).catch(function (error) {
+            logger.error('Unable to join session during automatic linking');
+            logger.errorStack(error);
+          });
+        }
+      };
+
+      var handleSet = function handleSet(key, remoteRoomId) {
+        if (key === localKey) {
+          return;
+        }
+
+        var clientId = parseInt(key, 36);
+
+        if (!bond.isConnectedToClient(clientId) && clientId !== bond.clientId) {
+          return;
+        }
+
+        if (roomId === false && remoteRoomId === false && clientId < bond.clientId) {
+          roomId = globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
+
+          bond.data.set(localKey, roomId);
+          return;
+        } else if (typeof roomId === 'string' && typeof remoteRoomId === 'string' && clientId > bond.clientId) {
+          roomId = remoteRoomId;
+          bond.data.set(localKey, remoteRoomId);
+        } else if (roomId === false && typeof remoteRoomId === 'string') {
+          roomId = remoteRoomId;
+          bond.data.set(localKey, remoteRoomId);
+        } else if (typeof roomId !== 'string' || roomId !== remoteRoomId) {
+          return;
+        }
+
+        abortSignal.removeEventListener('abort', handleAbort);
+        bond.removeListener('close', handleClose);
+        bond.removeListener('connect', handleConnect);
+        bond.removeListener('sessionJoin', handleSessionJoin);
+        bond.removeListener('session', handleSession);
+        bond.data.removeListener('set', handleSet);
+        resolve(roomId);
+      };
+
+      var handleClose = function handleClose() {
+        abortSignal.removeEventListener('abort', handleAbort);
+        bond.removeListener('close', handleClose);
+        bond.removeListener('connect', handleConnect);
+        bond.removeListener('sessionJoin', handleSessionJoin);
+        bond.removeListener('session', handleSession);
+        bond.data.removeListener('set', handleSet);
+        reject(new _errors.ClientClosedError('Client closed before local room ID was discovered'));
+      };
+
+      var handleAbort = /*#__PURE__*/function () {
+        var _ref24 = _asyncToGenerator(function* () {
+          abortSignal.removeEventListener('abort', handleAbort);
+          bond.removeListener('close', handleClose);
+          bond.removeListener('connect', handleConnect);
+          bond.removeListener('sessionJoin', handleSessionJoin);
+          bond.removeListener('session', handleSession);
+          bond.data.removeListener('set', handleSet);
+
+          try {
+            var queue = bond.queueMap.get(_constants.SESSION_QUEUE);
+
+            if (typeof queue !== 'undefined') {
+              yield queue.onIdle();
+            }
+
+            yield bond.close();
+          } catch (error) {
+            logger.error('Unable to close before throwing abort error');
+            logger.errorStack(error);
+          }
+
+          reject(new _errors.AbortError('Local room ID discovery aborted'));
+        });
+
+        return function handleAbort() {
+          return _ref24.apply(this, arguments);
+        };
+      }();
+
+      abortSignal.addEventListener('abort', handleAbort);
+      bond.data.addListener('set', handleSet);
+      bond.addListener('close', handleClose);
+      bond.addListener('connect', handleConnect);
+      bond.addListener('sessionJoin', handleSessionJoin);
+      bond.addListener('session', handleSession);
+      bond.startSession(globalThis.crypto.randomUUID()); // eslint-disable-line no-undef
+    });
+    yield bond.close();
+    return negotiatedRoomId;
+  });
+
+  return function (_x24, _x25, _x26, _x27) {
+    return _ref21.apply(this, arguments);
+  };
+}();
 //# sourceMappingURL=index.js.map

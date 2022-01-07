@@ -23,6 +23,7 @@ import {
   REMOVE_FROM_SESSION,
   CANCEL_INVITE_TO_SESSION,
   RESPONSE,
+  AUTOMATIC_DISCOVERY_ROOM_ID,
 } from './constants';
 import {
   AbortError,
@@ -61,7 +62,8 @@ type Logger = {
 type Options = {
   peerOptions?: Object,
   logger?: Logger,
-  sessionId?: string
+  sessionId?: string,
+  localConnectionsOnly?: boolean
 }
 
 export type SessionJoinHandler = ({ sessionId: string, userId: string, abortSignal: AbortSignal }) => [boolean, number, string] | Promise<[boolean, number, string]>;
@@ -113,6 +115,7 @@ const getSessionMap = (socketMap:Map<string, Socket>):Map<string | false, Map<nu
 
 export class Bond extends EventEmitter {
   static declineInviteToSession: (BraidClient, AbortSignal, { roomId: string, userId: string, clientId: number, sessionId: string, data: Object }) => Promise<{ code:number, text:string }>;
+  static getLocalRoomId: (BraidClient, string | false, string, AbortSignal, Options) => Promise<string>;
 
   declare roomId: string;
   declare clientId: number;
@@ -149,6 +152,7 @@ export class Bond extends EventEmitter {
   declare leaveSessionAfterLastClientTimeout: void | TimeoutID;
   declare preApprovedSessionUserIdSet: Set<string>;
   declare peerAddTrackHandlerMap: Map<Object, (Event) => void>;
+  declare localConnectionsOnly: boolean;
 
   constructor(braidClient: BraidClient, roomId:string, userId:string, options?: Options = {}) {
     super();
@@ -157,6 +161,7 @@ export class Bond extends EventEmitter {
     this.userId = userId;
     this.roomId = roomId;
     this.sessionId = false;
+    this.localConnectionsOnly = !!options.localConnectionsOnly;
     const name = `signal/${this.roomId}`;
     this.name = name;
     this.publishName = `signal/${this.roomId}/${this.clientId.toString(36)}`;
@@ -235,7 +240,7 @@ export class Bond extends EventEmitter {
       }, 5000);
     });
 
-    this.addListener('session', async () => {
+    this.addListener('session', () => {
       this.data.clear();
       this.sessionClientOffsetMap.clear();
     });
@@ -539,6 +544,11 @@ export class Bond extends EventEmitter {
     }
     const existingPeer = this.peerMap.get(clientId);
     const options = Object.assign({}, { initiator: clientId > this.clientId }, this.peerOptions);
+    if (this.localConnectionsOnly) {
+      options.config = {
+        iceServers: [],
+      };
+    }
     const peer = existingPeer || new SimplePeer(options);
     this.peerMap.set(clientId, peer);
     this.peerReconnectMap.set(clientId, reconnectCount + 1);
@@ -599,7 +609,7 @@ export class Bond extends EventEmitter {
     if (peer.connected) {
       peer.emit('peerReconnect');
       addPeerListeners();
-      this.emit('connect', { userId, clientId, serverId, socketId, peer });
+      this.emit('connect', { userId, clientId, serverId, socketId, socketHash, peer });
       return;
     }
     await new Promise((resolve) => {
@@ -619,10 +629,21 @@ export class Bond extends EventEmitter {
       const handleConnect = () => {
         cleanup();
         addPeerListeners();
-        this.emit('connect', { userId, clientId, serverId, socketId, peer });
+        this.emit('connect', { userId, clientId, serverId, socketId, socketHash, peer });
         resolve();
       };
       const handleSignal = async (data:Object) => {
+        if (this.localConnectionsOnly) {
+          if (data.type === 'candidate') {
+            const { candidate: { candidate } } = data;
+            const address = candidate.split(' ')[4];
+            if (address !== '127.0.0.1' && address !== '::1') {
+              return;
+            }
+          } else if (data.type === 'answer' || data.type === 'offer') {
+            data.sdp = data.sdp.replace(/a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s(?!(127\.0\.0\.1|::1)).*?\r\n/g, ''); // eslint-disable-line no-param-reassign
+          }
+        }
         try {
           await this.publish(SIGNAL, { serverId, socketId, data }, { CustomError: SignalError });
         } catch (error) {
@@ -1416,5 +1437,116 @@ const publish = (braidClient:BraidClient, abortSignal: AbortSignal, roomId:strin
 Bond.declineInviteToSession = (braidClient: BraidClient, abortSignal:AbortSignal, data: { roomId: string }) => {
   const { roomId } = data;
   return publish(braidClient, abortSignal, roomId, DECLINE_INVITE_TO_SESSION, data, { CustomError: DeclineInviteToSessionError });
+};
+
+Bond.getLocalRoomId = async (braidClient: BraidClient, _roomId:string | false, userId:string, abortSignal: AbortSignal, options?: Options = {}) => {
+  const bond = new Bond(braidClient, AUTOMATIC_DISCOVERY_ROOM_ID, userId, Object.assign({}, options, { localConnectionsOnly: true }));
+  let roomId = _roomId; // eslint-disable-line no-undef
+  const localKey = bond.clientId.toString(36);
+  const logger = options.logger || braidClient.logger;
+  const negotiatedRoomId = await new Promise((resolve, reject) => {
+    const handleSession = () => {
+      bond.data.set(localKey, roomId);
+    };
+    const handleConnect = ({ clientId, socketHash }:Socket) => {
+      const socket = bond.socketMap.get(socketHash);
+      if (typeof socket === 'undefined') {
+        return;
+      }
+      const { sessionId } = socket;
+      if (typeof sessionId !== 'string') {
+        return;
+      }
+      if (clientId > bond.clientId) {
+        bond.joinSession(sessionId).catch((error) => {
+          logger.error('Unable to join session during automatic linking');
+          logger.errorStack(error);
+        });
+      }
+    };
+    const handleSessionJoin = ({ clientId, sessionId }:Socket) => {
+      if (bond.sessionId === sessionId) {
+        return;
+      }
+      if (!bond.isConnectedToClient(clientId)) {
+        return;
+      }
+      if (typeof sessionId !== 'string') {
+        return;
+      }
+      if (clientId > bond.clientId) {
+        bond.joinSession(sessionId).catch((error) => {
+          logger.error('Unable to join session during automatic linking');
+          logger.errorStack(error);
+        });
+      }
+    };
+    const handleSet = (key:string, remoteRoomId:string | false) => {
+      if (key === localKey) {
+        return;
+      }
+      const clientId = parseInt(key, 36);
+      if (!bond.isConnectedToClient(clientId) && clientId !== bond.clientId) {
+        return;
+      }
+      if (roomId === false && remoteRoomId === false && clientId < bond.clientId) {
+        roomId = globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
+        bond.data.set(localKey, roomId);
+        return;
+      } else if (typeof roomId === 'string' && typeof remoteRoomId === 'string' && clientId > bond.clientId) {
+        roomId = remoteRoomId;
+        bond.data.set(localKey, remoteRoomId);
+      } else if (roomId === false && typeof remoteRoomId === 'string') {
+        roomId = remoteRoomId;
+        bond.data.set(localKey, remoteRoomId);
+      } else if (typeof roomId !== 'string' || roomId !== remoteRoomId) {
+        return;
+      }
+      abortSignal.removeEventListener('abort', handleAbort);
+      bond.removeListener('close', handleClose);
+      bond.removeListener('connect', handleConnect);
+      bond.removeListener('sessionJoin', handleSessionJoin);
+      bond.removeListener('session', handleSession);
+      bond.data.removeListener('set', handleSet);
+      resolve(roomId);
+    };
+    const handleClose = () => {
+      abortSignal.removeEventListener('abort', handleAbort);
+      bond.removeListener('close', handleClose);
+      bond.removeListener('connect', handleConnect);
+      bond.removeListener('sessionJoin', handleSessionJoin);
+      bond.removeListener('session', handleSession);
+      bond.data.removeListener('set', handleSet);
+      reject(new ClientClosedError('Client closed before local room ID was discovered'));
+    };
+    const handleAbort = async () => {
+      abortSignal.removeEventListener('abort', handleAbort);
+      bond.removeListener('close', handleClose);
+      bond.removeListener('connect', handleConnect);
+      bond.removeListener('sessionJoin', handleSessionJoin);
+      bond.removeListener('session', handleSession);
+      bond.data.removeListener('set', handleSet);
+      try {
+        const queue = bond.queueMap.get(SESSION_QUEUE);
+        if (typeof queue !== 'undefined') {
+          await queue.onIdle();
+        }
+        await bond.close();
+      } catch (error) {
+        logger.error('Unable to close before throwing abort error');
+        logger.errorStack(error);
+      }
+      reject(new AbortError('Local room ID discovery aborted'));
+    };
+    abortSignal.addEventListener('abort', handleAbort);
+    bond.data.addListener('set', handleSet);
+    bond.addListener('close', handleClose);
+    bond.addListener('connect', handleConnect);
+    bond.addListener('sessionJoin', handleSessionJoin);
+    bond.addListener('session', handleSession);
+    bond.startSession(globalThis.crypto.randomUUID()); // eslint-disable-line no-undef
+  });
+  await bond.close();
+  return negotiatedRoomId;
 };
 

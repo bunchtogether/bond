@@ -5,7 +5,7 @@ import ObservedRemoveMap from 'observed-remove/dist/map';
 import SimplePeer from 'simple-peer';
 import PQueue from 'p-queue';
 import { pack, unpack } from 'msgpackr';
-import { SIGNAL, START_SESSION, LEAVE_SESSION, JOIN_SESSION, INVITE_TO_SESSION, DECLINE_INVITE_TO_SESSION, SESSION_QUEUE, ABORT_SESSION_JOIN_REQUEST, SESSION_JOIN_REQUEST, SESSION_JOIN_RESPONSE, REMOVE_FROM_SESSION, CANCEL_INVITE_TO_SESSION, RESPONSE } from './constants';
+import { SIGNAL, START_SESSION, LEAVE_SESSION, JOIN_SESSION, INVITE_TO_SESSION, DECLINE_INVITE_TO_SESSION, SESSION_QUEUE, ABORT_SESSION_JOIN_REQUEST, SESSION_JOIN_REQUEST, SESSION_JOIN_RESPONSE, REMOVE_FROM_SESSION, CANCEL_INVITE_TO_SESSION, RESPONSE, AUTOMATIC_DISCOVERY_ROOM_ID } from './constants';
 import { AbortError, RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError, InviteToSessionError, InvitationDeclinedError, InvitedUserLeftError, InvitationTimeoutError, DeclineInviteToSessionError, RemoveFromSessionError, CancelInviteToSessionError, InvitationCancelledError, AbortSessionJoinError } from './errors';
 import { Ping, Pong, ObservedRemoveDump } from './messagepack';
 
@@ -77,6 +77,7 @@ export class Bond extends EventEmitter {
     this.userId = userId;
     this.roomId = roomId;
     this.sessionId = false;
+    this.localConnectionsOnly = !!options.localConnectionsOnly;
     const name = `signal/${this.roomId}`;
     this.name = name;
     this.publishName = `signal/${this.roomId}/${this.clientId.toString(36)}`;
@@ -172,7 +173,7 @@ export class Bond extends EventEmitter {
         }
       }, 5000);
     });
-    this.addListener('session', async () => {
+    this.addListener('session', () => {
       this.data.clear();
       this.sessionClientOffsetMap.clear();
     });
@@ -549,6 +550,13 @@ export class Bond extends EventEmitter {
     const options = Object.assign({}, {
       initiator: clientId > this.clientId
     }, this.peerOptions);
+
+    if (this.localConnectionsOnly) {
+      options.config = {
+        iceServers: []
+      };
+    }
+
     const peer = existingPeer || new SimplePeer(options);
     this.peerMap.set(clientId, peer);
     this.peerReconnectMap.set(clientId, reconnectCount + 1);
@@ -651,6 +659,7 @@ export class Bond extends EventEmitter {
         clientId,
         serverId,
         socketId,
+        socketHash,
         peer
       });
       return;
@@ -680,12 +689,30 @@ export class Bond extends EventEmitter {
           clientId,
           serverId,
           socketId,
+          socketHash,
           peer
         });
         resolve();
       };
 
       const handleSignal = async data => {
+        if (this.localConnectionsOnly) {
+          if (data.type === 'candidate') {
+            const {
+              candidate: {
+                candidate
+              }
+            } = data;
+            const address = candidate.split(' ')[4];
+
+            if (address !== '127.0.0.1' && address !== '::1') {
+              return;
+            }
+          } else if (data.type === 'answer' || data.type === 'offer') {
+            data.sdp = data.sdp.replace(/a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s(?!(127\.0\.0\.1|::1)).*?\r\n/g, ''); // eslint-disable-line no-param-reassign
+          }
+        }
+
         try {
           await this.publish(SIGNAL, {
             serverId,
@@ -1687,6 +1714,8 @@ export class Bond extends EventEmitter {
 
 _defineProperty(Bond, "declineInviteToSession", void 0);
 
+_defineProperty(Bond, "getLocalRoomId", void 0);
+
 const publish = (braidClient, abortSignal, roomId, type, value, options = {}) => {
   const name = `signal/${roomId}`;
   const publishName = `signal/${roomId}/${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(36)}`;
@@ -1769,5 +1798,149 @@ Bond.declineInviteToSession = (braidClient, abortSignal, data) => {
   return publish(braidClient, abortSignal, roomId, DECLINE_INVITE_TO_SESSION, data, {
     CustomError: DeclineInviteToSessionError
   });
+};
+
+Bond.getLocalRoomId = async (braidClient, _roomId, userId, abortSignal, options = {}) => {
+  const bond = new Bond(braidClient, AUTOMATIC_DISCOVERY_ROOM_ID, userId, Object.assign({}, options, {
+    localConnectionsOnly: true
+  }));
+  let roomId = _roomId; // eslint-disable-line no-undef
+
+  const localKey = bond.clientId.toString(36);
+  const logger = options.logger || braidClient.logger;
+  const negotiatedRoomId = await new Promise((resolve, reject) => {
+    const handleSession = () => {
+      bond.data.set(localKey, roomId);
+    };
+
+    const handleConnect = ({
+      clientId,
+      socketHash
+    }) => {
+      const socket = bond.socketMap.get(socketHash);
+
+      if (typeof socket === 'undefined') {
+        return;
+      }
+
+      const {
+        sessionId
+      } = socket;
+
+      if (typeof sessionId !== 'string') {
+        return;
+      }
+
+      if (clientId > bond.clientId) {
+        bond.joinSession(sessionId).catch(error => {
+          logger.error('Unable to join session during automatic linking');
+          logger.errorStack(error);
+        });
+      }
+    };
+
+    const handleSessionJoin = ({
+      clientId,
+      sessionId
+    }) => {
+      if (bond.sessionId === sessionId) {
+        return;
+      }
+
+      if (!bond.isConnectedToClient(clientId)) {
+        return;
+      }
+
+      if (typeof sessionId !== 'string') {
+        return;
+      }
+
+      if (clientId > bond.clientId) {
+        bond.joinSession(sessionId).catch(error => {
+          logger.error('Unable to join session during automatic linking');
+          logger.errorStack(error);
+        });
+      }
+    };
+
+    const handleSet = (key, remoteRoomId) => {
+      if (key === localKey) {
+        return;
+      }
+
+      const clientId = parseInt(key, 36);
+
+      if (!bond.isConnectedToClient(clientId) && clientId !== bond.clientId) {
+        return;
+      }
+
+      if (roomId === false && remoteRoomId === false && clientId < bond.clientId) {
+        roomId = globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
+
+        bond.data.set(localKey, roomId);
+        return;
+      } else if (typeof roomId === 'string' && typeof remoteRoomId === 'string' && clientId > bond.clientId) {
+        roomId = remoteRoomId;
+        bond.data.set(localKey, remoteRoomId);
+      } else if (roomId === false && typeof remoteRoomId === 'string') {
+        roomId = remoteRoomId;
+        bond.data.set(localKey, remoteRoomId);
+      } else if (typeof roomId !== 'string' || roomId !== remoteRoomId) {
+        return;
+      }
+
+      abortSignal.removeEventListener('abort', handleAbort);
+      bond.removeListener('close', handleClose);
+      bond.removeListener('connect', handleConnect);
+      bond.removeListener('sessionJoin', handleSessionJoin);
+      bond.removeListener('session', handleSession);
+      bond.data.removeListener('set', handleSet);
+      resolve(roomId);
+    };
+
+    const handleClose = () => {
+      abortSignal.removeEventListener('abort', handleAbort);
+      bond.removeListener('close', handleClose);
+      bond.removeListener('connect', handleConnect);
+      bond.removeListener('sessionJoin', handleSessionJoin);
+      bond.removeListener('session', handleSession);
+      bond.data.removeListener('set', handleSet);
+      reject(new ClientClosedError('Client closed before local room ID was discovered'));
+    };
+
+    const handleAbort = async () => {
+      abortSignal.removeEventListener('abort', handleAbort);
+      bond.removeListener('close', handleClose);
+      bond.removeListener('connect', handleConnect);
+      bond.removeListener('sessionJoin', handleSessionJoin);
+      bond.removeListener('session', handleSession);
+      bond.data.removeListener('set', handleSet);
+
+      try {
+        const queue = bond.queueMap.get(SESSION_QUEUE);
+
+        if (typeof queue !== 'undefined') {
+          await queue.onIdle();
+        }
+
+        await bond.close();
+      } catch (error) {
+        logger.error('Unable to close before throwing abort error');
+        logger.errorStack(error);
+      }
+
+      reject(new AbortError('Local room ID discovery aborted'));
+    };
+
+    abortSignal.addEventListener('abort', handleAbort);
+    bond.data.addListener('set', handleSet);
+    bond.addListener('close', handleClose);
+    bond.addListener('connect', handleConnect);
+    bond.addListener('sessionJoin', handleSessionJoin);
+    bond.addListener('session', handleSession);
+    bond.startSession(globalThis.crypto.randomUUID()); // eslint-disable-line no-undef
+  });
+  await bond.close();
+  return negotiatedRoomId;
 };
 //# sourceMappingURL=index.js.map
