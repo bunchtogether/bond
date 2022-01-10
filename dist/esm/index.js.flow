@@ -636,12 +636,13 @@ export class Bond extends EventEmitter {
         if (this.localConnectionsOnly) {
           if (data.type === 'candidate') {
             const { candidate: { candidate } } = data;
-            const address = candidate.split(' ')[4];
-            if (address !== '127.0.0.1' && address !== '::1') {
-              return;
+            const addressParts = candidate.split(' ');
+            if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
+              addressParts[4] = 'localhost';
+              data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
             }
           } else if (data.type === 'answer' || data.type === 'offer') {
-            data.sdp = data.sdp.replace(/a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s(?!(127\.0\.0\.1|::1)).*?\r\n/g, ''); // eslint-disable-line no-param-reassign
+            data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1localhost $3'); // eslint-disable-line no-param-reassign
           }
         }
         try {
@@ -1465,7 +1466,7 @@ Bond.getLocalRoomId = async (braidClient: BraidClient, _roomId:string | false, u
       }
     };
     const handleSessionJoin = ({ clientId, sessionId }:Socket) => {
-      if (bond.sessionId === sessionId) {
+      if (typeof sessionId === 'string' && bond.sessionId === sessionId) {
         return;
       }
       if (!bond.isConnectedToClient(clientId)) {

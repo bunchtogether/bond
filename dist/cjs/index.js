@@ -1047,13 +1047,14 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               if (_this5.localConnectionsOnly) {
                 if (data.type === 'candidate') {
                   var candidate = data.candidate.candidate;
-                  var address = candidate.split(' ')[4];
+                  var addressParts = candidate.split(' ');
 
-                  if (address !== '127.0.0.1' && address !== '::1') {
-                    return;
+                  if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
+                    addressParts[4] = 'localhost';
+                    data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
                   }
                 } else if (data.type === 'answer' || data.type === 'offer') {
-                  data.sdp = data.sdp.replace(/a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s(?!(127\.0\.0\.1|::1)).*?\r\n/g, ''); // eslint-disable-line no-param-reassign
+                  data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1localhost $3'); // eslint-disable-line no-param-reassign
                 }
               }
 
@@ -2445,7 +2446,7 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
         var clientId = _ref23.clientId,
             sessionId = _ref23.sessionId;
 
-        if (bond.sessionId === sessionId) {
+        if (typeof sessionId === 'string' && bond.sessionId === sessionId) {
           return;
         }
 
