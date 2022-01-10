@@ -706,11 +706,11 @@ export class Bond extends EventEmitter {
             const addressParts = candidate.split(' ');
 
             if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
-              addressParts[4] = 'localhost';
+              addressParts[4] = '127.0.0.1';
               data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
             }
           } else if (data.type === 'answer' || data.type === 'offer') {
-            data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1localhost $3'); // eslint-disable-line no-param-reassign
+            data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1127.0.0.1 $3'); // eslint-disable-line no-param-reassign
           }
         }
 
@@ -1686,8 +1686,8 @@ export class Bond extends EventEmitter {
   }
 
   reset() {
-    clearTimeout(this.leaveSessionAfterLastClientTimeout);
     this.handleBraidSet(this.name, []);
+    clearTimeout(this.leaveSessionAfterLastClientTimeout);
   }
 
   async close() {
