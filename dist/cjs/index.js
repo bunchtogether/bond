@@ -189,9 +189,6 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     _this.sessionClientOffsetMap = new Map();
     _this.preApprovedSessionUserIdSet = new Set();
     _this.peerAddTrackHandlerMap = new Map();
-
-    _this.addListener('sessionClientJoin', _this.handleSessionClientJoin.bind(_assertThisInitialized(_this)));
-
     _this._ready = _this.init(); // eslint-disable-line no-underscore-dangle
 
     if (typeof options.sessionId === 'string') {
@@ -200,7 +197,141 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       _this.ready = _this._ready; // eslint-disable-line no-underscore-dangle
     }
 
-    _this.addListener('socketJoin', function (socketData) {
+    _this.handleSessionClientJoin = /*#__PURE__*/function () {
+      var _ref = _asyncToGenerator(function* (clientId) {
+        var sessionClientIds = _this.sessionClientIds;
+
+        if (sessionClientIds.size > 1) {
+          clearTimeout(_this.leaveSessionAfterLastClientTimeout);
+        }
+
+        var interval;
+
+        var _peer; // eslint-disable-line no-underscore-dangle
+
+
+        var offset = 0;
+        var abortController = new AbortController();
+        var abortSignal = abortController.signal;
+
+        var cleanup = function cleanup() {
+          abortController.abort();
+
+          _this.removeListener('sessionClientLeave', handleSessionClientLeave);
+
+          if (typeof _peer !== 'undefined') {
+            _peer.removeListener('close', handlePeerClose);
+
+            _peer.removeListener('data', handlePeerData);
+          }
+
+          _this.data.removeListener('publish', handleDataPublish);
+
+          clearInterval(interval);
+        };
+
+        var handlePeerClose = function handlePeerClose() {
+          cleanup();
+
+          if (_this.sessionClientIds.has(clientId)) {
+            _this.handleSessionClientJoin(clientId);
+          }
+        };
+
+        var handleSessionClientLeave = function handleSessionClientLeave(oldClientId) {
+          if (clientId !== oldClientId) {
+            return;
+          }
+
+          cleanup();
+        };
+
+        var handleDataPublish = function handleDataPublish(queue) {
+          sendToPeer(new _messagepack.ObservedRemoveDump(queue));
+        };
+
+        var sendToPeer = function sendToPeer(unpacked) {
+          if (typeof peer === 'undefined') {
+            throw new Error('Peer does not exist');
+          }
+
+          peer.send((0, _msgpackr.pack)(unpacked));
+        };
+
+        var handlePeerData = function handlePeerData(packed) {
+          var message = (0, _msgpackr.unpack)(packed);
+
+          if (message instanceof _messagepack.Ping) {
+            sendToPeer(new _messagepack.Pong(message.timestamp, Date.now()));
+          } else if (message instanceof _messagepack.Pong) {
+            offset = Date.now() - message.wallclock - (performance.now() - message.timestamp) / 2;
+
+            _this.sessionClientOffsetMap.set(clientId, offset);
+          } else if (message instanceof _messagepack.ObservedRemoveDump) {
+            _this.data.process(message.queue);
+          }
+        };
+
+        _this.addListener('sessionClientLeave', handleSessionClientLeave);
+
+        if (!_this.isConnectedToClient(clientId)) {
+          yield new Promise(function (resolve) {
+            var handleConnect = function handleConnect(_ref2) {
+              var newClientId = _ref2.clientId;
+
+              if (newClientId !== clientId) {
+                return;
+              }
+
+              _this.removeListener('connect', handleConnect);
+
+              abortSignal.removeEventListener('abort', handleAbort);
+              resolve();
+            };
+
+            var handleAbort = function handleAbort() {
+              _this.removeListener('connect', handleConnect);
+
+              abortSignal.removeEventListener('abort', handleAbort);
+              resolve();
+            };
+
+            _this.addListener('connect', handleConnect);
+
+            abortSignal.addEventListener('abort', handleAbort);
+          });
+
+          if (abortSignal.aborted) {
+            return;
+          }
+        }
+
+        var peer = _this.peerMap.get(clientId);
+
+        _peer = peer;
+
+        if (typeof peer === 'undefined') {
+          throw new Error('Peer does not exist');
+        }
+
+        peer.addListener('close', handlePeerClose);
+        peer.addListener('data', handlePeerData);
+        interval = setInterval(function () {
+          peer.send((0, _msgpackr.pack)(new _messagepack.Ping(performance.now())));
+        }, 1000);
+        peer.send((0, _msgpackr.pack)(new _messagepack.Ping(performance.now())));
+
+        _this.data.addListener('publish', handleDataPublish);
+
+        handleDataPublish(_this.data.dump());
+      });
+
+      return function (_x) {
+        return _ref.apply(this, arguments);
+      };
+    }();
+
+    _this.handleSocketJoin = function (socketData) {
       var clientId = socketData.clientId;
 
       if (clientId === _this.clientId) {
@@ -218,9 +349,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
       _this.addToQueue(clientId, function () {
         return _this.connectToPeer(socketData);
       });
-    });
+    };
 
-    _this.addListener('socketLeave', function (socketData) {
+    _this.handleSocketLeave = function (socketData) {
       var clientId = socketData.clientId;
 
       if (clientId === _this.clientId) {
@@ -242,19 +373,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           return _this.disconnectFromPeer(socketData);
         });
       }
-    });
+    };
 
-    _this.addListener('sessionClientJoin', function () {
-      var sessionClientIds = _this.sessionClientIds;
-
-      if (sessionClientIds.size > 1) {
-        return;
-      }
-
-      clearTimeout(_this.leaveSessionAfterLastClientTimeout);
-    });
-
-    _this.addListener('sessionClientLeave', /*#__PURE__*/_asyncToGenerator(function* () {
+    _this.handleSessionClientLeave = function () {
       var sessionClientIds = _this.sessionClientIds;
 
       if (sessionClientIds.size > 1) {
@@ -270,13 +391,23 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           _this.logger.errorStack(error);
         }
       }), 5000);
-    }));
+    };
 
-    _this.addListener('session', function () {
+    _this.handleSession = function () {
       _this.data.clear();
 
       _this.sessionClientOffsetMap.clear();
-    });
+    };
+
+    _this.addListener('socketJoin', _this.handleSocketJoin);
+
+    _this.addListener('socketLeave', _this.handleSocketLeave);
+
+    _this.addListener('sessionClientJoin', _this.handleSessionClientJoin);
+
+    _this.addListener('sessionClientLeave', _this.handleSessionClientLeave);
+
+    _this.addListener('session', _this.handleSession);
 
     _this.handleBraidSet = function (key, values) {
       if (key !== name) {
@@ -796,7 +927,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function publish(_x, _x2) {
+      function publish(_x2, _x3) {
         return _publish.apply(this, arguments);
       }
 
@@ -848,8 +979,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               resolve();
             };
 
-            var handleSocketLeave = function handleSocketLeave(_ref3) {
-              var oldSocketHash = _ref3.socketHash;
+            var handleSocketLeave = function handleSocketLeave(_ref4) {
+              var oldSocketHash = _ref4.socketHash;
 
               if (socketHash !== oldSocketHash) {
                 return;
@@ -905,7 +1036,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref4 = _asyncToGenerator(function* (data) {
+            var _ref5 = _asyncToGenerator(function* (data) {
               try {
                 yield _this5.publish(_constants.SIGNAL, {
                   serverId: serverId,
@@ -921,8 +1052,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSignal(_x4) {
-              return _ref4.apply(this, arguments);
+            return function handleSignal(_x5) {
+              return _ref5.apply(this, arguments);
             };
           }();
 
@@ -1043,7 +1174,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref5 = _asyncToGenerator(function* (data) {
+            var _ref6 = _asyncToGenerator(function* (data) {
               if (_this5.localConnectionsOnly) {
                 if (data.type === 'candidate') {
                   var candidate = data.candidate.candidate;
@@ -1080,8 +1211,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSignal(_x5) {
-              return _ref5.apply(this, arguments);
+            return function handleSignal(_x6) {
+              return _ref6.apply(this, arguments);
             };
           }();
 
@@ -1126,8 +1257,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             resolve();
           };
 
-          var handleSocketLeave = function handleSocketLeave(_ref6) {
-            var oldSocketHash = _ref6.socketHash;
+          var handleSocketLeave = function handleSocketLeave(_ref7) {
+            var oldSocketHash = _ref7.socketHash;
 
             if (socketHash !== oldSocketHash) {
               return;
@@ -1160,7 +1291,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function connectToPeer(_x3) {
+      function connectToPeer(_x4) {
         return _connectToPeer.apply(this, arguments);
       }
 
@@ -1183,7 +1314,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         peer.addStream(stream);
       });
 
-      function addStream(_x6, _x7) {
+      function addStream(_x7, _x8) {
         return _addStream.apply(this, arguments);
       }
 
@@ -1203,7 +1334,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         peer.removeStream(stream);
       });
 
-      function removeStream(_x8, _x9) {
+      function removeStream(_x9, _x10) {
         return _removeStream.apply(this, arguments);
       }
 
@@ -1212,8 +1343,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "disconnectFromPeer",
     value: function () {
-      var _disconnectFromPeer = _asyncToGenerator(function* (_ref7) {
-        var clientId = _ref7.clientId;
+      var _disconnectFromPeer = _asyncToGenerator(function* (_ref8) {
+        var clientId = _ref8.clientId;
         var peer = this.peerMap.get(clientId);
 
         if (typeof peer === 'undefined') {
@@ -1224,7 +1355,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         peer.destroy();
       });
 
-      function disconnectFromPeer(_x10) {
+      function disconnectFromPeer(_x11) {
         return _disconnectFromPeer.apply(this, arguments);
       }
 
@@ -1307,7 +1438,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function removeFromSession(_x11) {
+      function removeFromSession(_x12) {
         return _removeFromSession.apply(this, arguments);
       }
 
@@ -1342,7 +1473,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function cancelInviteToSession(_x12) {
+      function cancelInviteToSession(_x13) {
         return _cancelInviteToSession.apply(this, arguments);
       }
 
@@ -1371,9 +1502,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         var didCancel = false;
 
-        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref8) {
-          var cancelledSessionId = _ref8.sessionId,
-              cancelledUserId = _ref8.userId;
+        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref9) {
+          var cancelledSessionId = _ref9.sessionId,
+              cancelledUserId = _ref9.userId;
 
           if (cancelledSessionId !== sessionId) {
             return;
@@ -1387,7 +1518,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         };
 
         var leaveSession = /*#__PURE__*/function () {
-          var _ref9 = _asyncToGenerator(function* () {
+          var _ref10 = _asyncToGenerator(function* () {
             if (hasSessionId) {
               return;
             }
@@ -1402,7 +1533,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           });
 
           return function leaveSession() {
-            return _ref9.apply(this, arguments);
+            return _ref10.apply(this, arguments);
           };
         }();
 
@@ -1466,9 +1597,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           }), timeoutDuration);
 
           var handleCancelInvite = /*#__PURE__*/function () {
-            var _ref12 = _asyncToGenerator(function* (_ref11) {
-              var cancelledSessionId = _ref11.sessionId,
-                  cancelledUserId = _ref11.userId;
+            var _ref13 = _asyncToGenerator(function* (_ref12) {
+              var cancelledSessionId = _ref12.sessionId,
+                  cancelledUserId = _ref12.userId;
 
               if (cancelledSessionId !== sessionId) {
                 return;
@@ -1483,8 +1614,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               reject(new _errors.InvitationCancelledError("Invitation to user ".concat(userId, " was cancelled")));
             });
 
-            return function handleCancelInvite(_x14) {
-              return _ref12.apply(this, arguments);
+            return function handleCancelInvite(_x15) {
+              return _ref13.apply(this, arguments);
             };
           }();
 
@@ -1503,7 +1634,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
 
           var handleSocketLeave = /*#__PURE__*/function () {
-            var _ref13 = _asyncToGenerator(function* (socket) {
+            var _ref14 = _asyncToGenerator(function* (socket) {
               if (socket.userId !== _this6.userId) {
                 return;
               }
@@ -1540,8 +1671,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSocketLeave(_x15) {
-              return _ref13.apply(this, arguments);
+            return function handleSocketLeave(_x16) {
+              return _ref14.apply(this, arguments);
             };
           }();
 
@@ -1560,19 +1691,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref14 = _asyncToGenerator(function* () {
+            var _ref15 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref14.apply(this, arguments);
+              return _ref15.apply(this, arguments);
             };
           }();
 
           var handleLeave = /*#__PURE__*/function () {
-            var _ref15 = _asyncToGenerator(function* (peerUserId) {
+            var _ref16 = _asyncToGenerator(function* (peerUserId) {
               if (userId !== peerUserId) {
                 return;
               }
@@ -1582,8 +1713,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               reject(new _errors.InvitedUserLeftError("User ".concat(userId, " left before accepting the invitation")));
             });
 
-            return function handleLeave(_x16) {
-              return _ref15.apply(this, arguments);
+            return function handleLeave(_x17) {
+              return _ref16.apply(this, arguments);
             };
           }();
 
@@ -1605,7 +1736,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function inviteToSession(_x13) {
+      function inviteToSession(_x14) {
         return _inviteToSession.apply(this, arguments);
       }
 
@@ -1638,7 +1769,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (typeof sessionJoinHandler === 'function') {
           var wrappedSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref16 = _asyncToGenerator(function* (values) {
+            var _ref17 = _asyncToGenerator(function* (values) {
               if (_this7.preApprovedSessionUserIdSet.has(values.userId)) {
                 return [true, 200, 'Authorized'];
               }
@@ -1654,8 +1785,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return [true, 200, 'Authorized'];
             });
 
-            return function wrappedSessionJoinHandler(_x19) {
-              return _ref16.apply(this, arguments);
+            return function wrappedSessionJoinHandler(_x20) {
+              return _ref17.apply(this, arguments);
             };
           }();
 
@@ -1667,7 +1798,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function startSession(_x17, _x18) {
+      function startSession(_x18, _x19) {
         return _startSession.apply(this, arguments);
       }
 
@@ -1715,7 +1846,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function joinSession(_x20) {
+      function joinSession(_x21) {
         return _joinSession.apply(this, arguments);
       }
 
@@ -2045,7 +2176,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function handleMessage(_x21) {
+      function handleMessage(_x22) {
         return _handleMessage.apply(this, arguments);
       }
 
@@ -2091,9 +2222,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref18) {
-            var newClientId = _ref18.clientId,
-                _p = _ref18.peer;
+          var handlePeer = function handlePeer(_ref19) {
+            var newClientId = _ref19.clientId,
+                _p = _ref19.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2106,9 +2237,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref19) {
-            var newClientId = _ref19.clientId,
-                _p = _ref19.peer;
+          var handleConnect = function handleConnect(_ref20) {
+            var newClientId = _ref20.clientId,
+                _p = _ref20.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2135,141 +2266,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function getConnectedPeer(_x22) {
+      function getConnectedPeer(_x23) {
         return _getConnectedPeer.apply(this, arguments);
       }
 
       return getConnectedPeer;
-    }()
-  }, {
-    key: "handleSessionClientJoin",
-    value: function () {
-      var _handleSessionClientJoin = _asyncToGenerator(function* (clientId) {
-        var _this12 = this;
-
-        var interval;
-
-        var _peer; // eslint-disable-line no-underscore-dangle
-
-
-        var offset = 0;
-        var abortController = new AbortController();
-        var abortSignal = abortController.signal;
-
-        var cleanup = function cleanup() {
-          abortController.abort();
-
-          _this12.removeListener('sessionClientLeave', handleSessionClientLeave);
-
-          if (typeof _peer !== 'undefined') {
-            _peer.removeListener('close', handlePeerClose);
-
-            _peer.removeListener('data', handlePeerData);
-          }
-
-          _this12.data.removeListener('publish', handleDataPublish);
-
-          clearInterval(interval);
-        };
-
-        var handlePeerClose = function handlePeerClose() {
-          cleanup();
-
-          if (_this12.sessionClientIds.has(clientId)) {
-            _this12.handleSessionClientJoin(clientId);
-          }
-        };
-
-        var handleSessionClientLeave = function handleSessionClientLeave(oldClientId) {
-          if (clientId !== oldClientId) {
-            return;
-          }
-
-          cleanup();
-        };
-
-        var handleDataPublish = function handleDataPublish(queue) {
-          sendToPeer(new _messagepack.ObservedRemoveDump(queue));
-        };
-
-        var sendToPeer = function sendToPeer(unpacked) {
-          if (typeof peer === 'undefined') {
-            throw new Error('Peer does not exist');
-          }
-
-          peer.send((0, _msgpackr.pack)(unpacked));
-        };
-
-        var handlePeerData = function handlePeerData(packed) {
-          var message = (0, _msgpackr.unpack)(packed);
-
-          if (message instanceof _messagepack.Ping) {
-            sendToPeer(new _messagepack.Pong(message.timestamp, Date.now()));
-          } else if (message instanceof _messagepack.Pong) {
-            offset = Date.now() - message.wallclock - (performance.now() - message.timestamp) / 2;
-
-            _this12.sessionClientOffsetMap.set(clientId, offset);
-          } else if (message instanceof _messagepack.ObservedRemoveDump) {
-            _this12.data.process(message.queue);
-          }
-        };
-
-        this.addListener('sessionClientLeave', handleSessionClientLeave);
-
-        if (!this.isConnectedToClient(clientId)) {
-          yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref20) {
-              var newClientId = _ref20.clientId;
-
-              if (newClientId !== clientId) {
-                return;
-              }
-
-              _this12.removeListener('connect', handleConnect);
-
-              abortSignal.removeEventListener('abort', handleAbort);
-              resolve();
-            };
-
-            var handleAbort = function handleAbort() {
-              _this12.removeListener('connect', handleConnect);
-
-              abortSignal.removeEventListener('abort', handleAbort);
-              resolve();
-            };
-
-            _this12.addListener('connect', handleConnect);
-
-            abortSignal.addEventListener('abort', handleAbort);
-          });
-
-          if (abortSignal.aborted) {
-            return;
-          }
-        }
-
-        var peer = this.peerMap.get(clientId);
-        _peer = peer;
-
-        if (typeof peer === 'undefined') {
-          throw new Error('Peer does not exist');
-        }
-
-        peer.addListener('close', handlePeerClose);
-        peer.addListener('data', handlePeerData);
-        interval = setInterval(function () {
-          peer.send((0, _msgpackr.pack)(new _messagepack.Ping(performance.now())));
-        }, 1000);
-        peer.send((0, _msgpackr.pack)(new _messagepack.Ping(performance.now())));
-        this.data.addListener('publish', handleDataPublish);
-        handleDataPublish(this.data.dump());
-      });
-
-      function handleSessionClientJoin(_x23) {
-        return _handleSessionClientJoin.apply(this, arguments);
-      }
-
-      return handleSessionClientJoin;
     }()
   }, {
     key: "declineInviteToSession",
@@ -2288,8 +2289,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "close",
     value: function () {
       var _close = _asyncToGenerator(function* () {
-        this.reset();
         this.active = false;
+        this.reset();
         this.emit('close');
 
         try {
@@ -2299,6 +2300,11 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           this.logger.errorStack(error);
         }
 
+        this.removeListener('socketJoin', this.handleSocketJoin);
+        this.removeListener('socketLeave', this.handleSocketLeave);
+        this.removeListener('sessionClientJoin', this.handleSessionClientJoin);
+        this.removeListener('sessionClientLeave', this.handleSessionClientLeave);
+        this.removeListener('session', this.handleSession);
         this.braidClient.data.removeListener('set', this.handleBraidSet);
         this.braidClient.removeListener('close', this.handleBraidClose);
         this.braidClient.removeListener('closeRequested', this.handleBraidCloseRequested);

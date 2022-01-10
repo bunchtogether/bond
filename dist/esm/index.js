@@ -102,7 +102,6 @@ export class Bond extends EventEmitter {
     this.sessionClientOffsetMap = new Map();
     this.preApprovedSessionUserIdSet = new Set();
     this.peerAddTrackHandlerMap = new Map();
-    this.addListener('sessionClientJoin', this.handleSessionClientJoin.bind(this));
     this._ready = this.init(); // eslint-disable-line no-underscore-dangle
 
     if (typeof options.sessionId === 'string') {
@@ -111,7 +110,126 @@ export class Bond extends EventEmitter {
       this.ready = this._ready; // eslint-disable-line no-underscore-dangle
     }
 
-    this.addListener('socketJoin', socketData => {
+    this.handleSessionClientJoin = async clientId => {
+      const sessionClientIds = this.sessionClientIds;
+
+      if (sessionClientIds.size > 1) {
+        clearTimeout(this.leaveSessionAfterLastClientTimeout);
+      }
+
+      let interval;
+
+      let _peer; // eslint-disable-line no-underscore-dangle
+
+
+      let offset = 0;
+      const abortController = new AbortController();
+      const abortSignal = abortController.signal;
+
+      const cleanup = () => {
+        abortController.abort();
+        this.removeListener('sessionClientLeave', handleSessionClientLeave);
+
+        if (typeof _peer !== 'undefined') {
+          _peer.removeListener('close', handlePeerClose);
+
+          _peer.removeListener('data', handlePeerData);
+        }
+
+        this.data.removeListener('publish', handleDataPublish);
+        clearInterval(interval);
+      };
+
+      const handlePeerClose = () => {
+        cleanup();
+
+        if (this.sessionClientIds.has(clientId)) {
+          this.handleSessionClientJoin(clientId);
+        }
+      };
+
+      const handleSessionClientLeave = oldClientId => {
+        if (clientId !== oldClientId) {
+          return;
+        }
+
+        cleanup();
+      };
+
+      const handleDataPublish = queue => {
+        sendToPeer(new ObservedRemoveDump(queue));
+      };
+
+      const sendToPeer = unpacked => {
+        if (typeof peer === 'undefined') {
+          throw new Error('Peer does not exist');
+        }
+
+        peer.send(pack(unpacked));
+      };
+
+      const handlePeerData = packed => {
+        const message = unpack(packed);
+
+        if (message instanceof Ping) {
+          sendToPeer(new Pong(message.timestamp, Date.now()));
+        } else if (message instanceof Pong) {
+          offset = Date.now() - message.wallclock - (performance.now() - message.timestamp) / 2;
+          this.sessionClientOffsetMap.set(clientId, offset);
+        } else if (message instanceof ObservedRemoveDump) {
+          this.data.process(message.queue);
+        }
+      };
+
+      this.addListener('sessionClientLeave', handleSessionClientLeave);
+
+      if (!this.isConnectedToClient(clientId)) {
+        await new Promise(resolve => {
+          const handleConnect = ({
+            clientId: newClientId
+          }) => {
+            if (newClientId !== clientId) {
+              return;
+            }
+
+            this.removeListener('connect', handleConnect);
+            abortSignal.removeEventListener('abort', handleAbort);
+            resolve();
+          };
+
+          const handleAbort = () => {
+            this.removeListener('connect', handleConnect);
+            abortSignal.removeEventListener('abort', handleAbort);
+            resolve();
+          };
+
+          this.addListener('connect', handleConnect);
+          abortSignal.addEventListener('abort', handleAbort);
+        });
+
+        if (abortSignal.aborted) {
+          return;
+        }
+      }
+
+      const peer = this.peerMap.get(clientId);
+      _peer = peer;
+
+      if (typeof peer === 'undefined') {
+        throw new Error('Peer does not exist');
+      }
+
+      peer.addListener('close', handlePeerClose);
+      peer.addListener('data', handlePeerData);
+      interval = setInterval(() => {
+        peer.send(pack(new Ping(performance.now())));
+      }, 1000);
+      peer.send(pack(new Ping(performance.now())));
+      this.data.addListener('publish', handleDataPublish);
+      handleDataPublish(this.data.dump());
+    };
+
+    this.handleSocketJoin = socketData => {
       const {
         clientId
       } = socketData;
@@ -127,8 +245,9 @@ export class Bond extends EventEmitter {
       }
 
       this.addToQueue(clientId, () => this.connectToPeer(socketData));
-    });
-    this.addListener('socketLeave', socketData => {
+    };
+
+    this.handleSocketLeave = socketData => {
       const {
         clientId
       } = socketData;
@@ -147,17 +266,9 @@ export class Bond extends EventEmitter {
       } else {
         this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
       }
-    });
-    this.addListener('sessionClientJoin', () => {
-      const sessionClientIds = this.sessionClientIds;
+    };
 
-      if (sessionClientIds.size > 1) {
-        return;
-      }
-
-      clearTimeout(this.leaveSessionAfterLastClientTimeout);
-    });
-    this.addListener('sessionClientLeave', async () => {
+    this.handleSessionClientLeave = () => {
       const sessionClientIds = this.sessionClientIds;
 
       if (sessionClientIds.size > 1) {
@@ -172,11 +283,18 @@ export class Bond extends EventEmitter {
           this.logger.errorStack(error);
         }
       }, 5000);
-    });
-    this.addListener('session', () => {
+    };
+
+    this.handleSession = () => {
       this.data.clear();
       this.sessionClientOffsetMap.clear();
-    });
+    };
+
+    this.addListener('socketJoin', this.handleSocketJoin);
+    this.addListener('socketLeave', this.handleSocketLeave);
+    this.addListener('sessionClientJoin', this.handleSessionClientJoin);
+    this.addListener('sessionClientLeave', this.handleSessionClientLeave);
+    this.addListener('session', this.handleSession);
 
     this.handleBraidSet = (key, values) => {
       if (key !== name) {
@@ -1566,119 +1684,6 @@ export class Bond extends EventEmitter {
     });
   }
 
-  async handleSessionClientJoin(clientId) {
-    let interval;
-
-    let _peer; // eslint-disable-line no-underscore-dangle
-
-
-    let offset = 0;
-    const abortController = new AbortController();
-    const abortSignal = abortController.signal;
-
-    const cleanup = () => {
-      abortController.abort();
-      this.removeListener('sessionClientLeave', handleSessionClientLeave);
-
-      if (typeof _peer !== 'undefined') {
-        _peer.removeListener('close', handlePeerClose);
-
-        _peer.removeListener('data', handlePeerData);
-      }
-
-      this.data.removeListener('publish', handleDataPublish);
-      clearInterval(interval);
-    };
-
-    const handlePeerClose = () => {
-      cleanup();
-
-      if (this.sessionClientIds.has(clientId)) {
-        this.handleSessionClientJoin(clientId);
-      }
-    };
-
-    const handleSessionClientLeave = oldClientId => {
-      if (clientId !== oldClientId) {
-        return;
-      }
-
-      cleanup();
-    };
-
-    const handleDataPublish = queue => {
-      sendToPeer(new ObservedRemoveDump(queue));
-    };
-
-    const sendToPeer = unpacked => {
-      if (typeof peer === 'undefined') {
-        throw new Error('Peer does not exist');
-      }
-
-      peer.send(pack(unpacked));
-    };
-
-    const handlePeerData = packed => {
-      const message = unpack(packed);
-
-      if (message instanceof Ping) {
-        sendToPeer(new Pong(message.timestamp, Date.now()));
-      } else if (message instanceof Pong) {
-        offset = Date.now() - message.wallclock - (performance.now() - message.timestamp) / 2;
-        this.sessionClientOffsetMap.set(clientId, offset);
-      } else if (message instanceof ObservedRemoveDump) {
-        this.data.process(message.queue);
-      }
-    };
-
-    this.addListener('sessionClientLeave', handleSessionClientLeave);
-
-    if (!this.isConnectedToClient(clientId)) {
-      await new Promise(resolve => {
-        const handleConnect = ({
-          clientId: newClientId
-        }) => {
-          if (newClientId !== clientId) {
-            return;
-          }
-
-          this.removeListener('connect', handleConnect);
-          abortSignal.removeEventListener('abort', handleAbort);
-          resolve();
-        };
-
-        const handleAbort = () => {
-          this.removeListener('connect', handleConnect);
-          abortSignal.removeEventListener('abort', handleAbort);
-          resolve();
-        };
-
-        this.addListener('connect', handleConnect);
-        abortSignal.addEventListener('abort', handleAbort);
-      });
-
-      if (abortSignal.aborted) {
-        return;
-      }
-    }
-
-    const peer = this.peerMap.get(clientId);
-    _peer = peer;
-
-    if (typeof peer === 'undefined') {
-      throw new Error('Peer does not exist');
-    }
-
-    peer.addListener('close', handlePeerClose);
-    peer.addListener('data', handlePeerData);
-    interval = setInterval(() => {
-      peer.send(pack(new Ping(performance.now())));
-    }, 1000);
-    peer.send(pack(new Ping(performance.now())));
-    this.data.addListener('publish', handleDataPublish);
-    handleDataPublish(this.data.dump());
-  }
-
   declineInviteToSession(data) {
     return this.publish(DECLINE_INVITE_TO_SESSION, data, {
       CustomError: DeclineInviteToSessionError
@@ -1691,8 +1696,8 @@ export class Bond extends EventEmitter {
   }
 
   async close() {
-    this.reset();
     this.active = false;
+    this.reset();
     this.emit('close');
 
     try {
@@ -1702,6 +1707,11 @@ export class Bond extends EventEmitter {
       this.logger.errorStack(error);
     }
 
+    this.removeListener('socketJoin', this.handleSocketJoin);
+    this.removeListener('socketLeave', this.handleSocketLeave);
+    this.removeListener('sessionClientJoin', this.handleSessionClientJoin);
+    this.removeListener('sessionClientLeave', this.handleSessionClientLeave);
+    this.removeListener('session', this.handleSession);
     this.braidClient.data.removeListener('set', this.handleBraidSet);
     this.braidClient.removeListener('close', this.handleBraidClose);
     this.braidClient.removeListener('closeRequested', this.handleBraidCloseRequested);
