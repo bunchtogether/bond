@@ -365,12 +365,12 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           _this.peerDisconnectTimeoutMap.delete(clientId);
 
           _this.addToQueue(clientId, function () {
-            return _this.disconnectFromPeer(socketData);
+            return _this.disconnectFromPeer(clientId);
           });
         }, 15000));
       } else {
         _this.addToQueue(clientId, function () {
-          return _this.disconnectFromPeer(socketData);
+          return _this.disconnectFromPeer(clientId);
         });
       }
     };
@@ -1175,19 +1175,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
           var handleSignal = /*#__PURE__*/function () {
             var _ref6 = _asyncToGenerator(function* (data) {
-              if (_this5.localConnectionsOnly) {
-                if (data.type === 'candidate') {
-                  var candidate = data.candidate.candidate;
-                  var addressParts = candidate.split(' ');
-
-                  if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
-                    addressParts[4] = '127.0.0.1';
-                    data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
-                  }
-                } else if (data.type === 'answer' || data.type === 'offer') {
-                  data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1127.0.0.1 $3'); // eslint-disable-line no-param-reassign
-                }
-              }
+              // if (this.localConnectionsOnly) {
+              //  if (data.type === 'candidate') {
+              //    const { candidate: { candidate } } = data;
+              //    const addressParts = candidate.split(' ');
+              //    if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
+              //      addressParts[4] = '127.0.0.1';
+              //      data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
+              //    }
+              //  } else if (data.type === 'answer' || data.type === 'offer') {
+              //    data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1127.0.0.1 $3'); // eslint-disable-line no-param-reassign
+              //  }
+              // }
+              console.log(JSON.stringify(data, null, 2));
 
               try {
                 yield _this5.publish(_constants.SIGNAL, {
@@ -1343,8 +1343,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "disconnectFromPeer",
     value: function () {
-      var _disconnectFromPeer = _asyncToGenerator(function* (_ref8) {
-        var clientId = _ref8.clientId;
+      var _disconnectFromPeer = _asyncToGenerator(function* (clientId) {
         var peer = this.peerMap.get(clientId);
 
         if (typeof peer === 'undefined') {
@@ -1502,9 +1501,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         var didCancel = false;
 
-        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref9) {
-          var cancelledSessionId = _ref9.sessionId,
-              cancelledUserId = _ref9.userId;
+        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref8) {
+          var cancelledSessionId = _ref8.sessionId,
+              cancelledUserId = _ref8.userId;
 
           if (cancelledSessionId !== sessionId) {
             return;
@@ -1518,7 +1517,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         };
 
         var leaveSession = /*#__PURE__*/function () {
-          var _ref10 = _asyncToGenerator(function* () {
+          var _ref9 = _asyncToGenerator(function* () {
             if (hasSessionId) {
               return;
             }
@@ -1533,7 +1532,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           });
 
           return function leaveSession() {
-            return _ref10.apply(this, arguments);
+            return _ref9.apply(this, arguments);
           };
         }();
 
@@ -1597,9 +1596,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           }), timeoutDuration);
 
           var handleCancelInvite = /*#__PURE__*/function () {
-            var _ref13 = _asyncToGenerator(function* (_ref12) {
-              var cancelledSessionId = _ref12.sessionId,
-                  cancelledUserId = _ref12.userId;
+            var _ref12 = _asyncToGenerator(function* (_ref11) {
+              var cancelledSessionId = _ref11.sessionId,
+                  cancelledUserId = _ref11.userId;
 
               if (cancelledSessionId !== sessionId) {
                 return;
@@ -1615,7 +1614,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleCancelInvite(_x15) {
-              return _ref13.apply(this, arguments);
+              return _ref12.apply(this, arguments);
             };
           }();
 
@@ -1634,7 +1633,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
 
           var handleSocketLeave = /*#__PURE__*/function () {
-            var _ref14 = _asyncToGenerator(function* (socket) {
+            var _ref13 = _asyncToGenerator(function* (socket) {
               if (socket.userId !== _this6.userId) {
                 return;
               }
@@ -1672,7 +1671,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleSocketLeave(_x16) {
-              return _ref14.apply(this, arguments);
+              return _ref13.apply(this, arguments);
             };
           }();
 
@@ -1691,19 +1690,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref15 = _asyncToGenerator(function* () {
+            var _ref14 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref15.apply(this, arguments);
+              return _ref14.apply(this, arguments);
             };
           }();
 
           var handleLeave = /*#__PURE__*/function () {
-            var _ref16 = _asyncToGenerator(function* (peerUserId) {
+            var _ref15 = _asyncToGenerator(function* (peerUserId) {
               if (userId !== peerUserId) {
                 return;
               }
@@ -1714,7 +1713,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function handleLeave(_x17) {
-              return _ref16.apply(this, arguments);
+              return _ref15.apply(this, arguments);
             };
           }();
 
@@ -1769,7 +1768,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (typeof sessionJoinHandler === 'function') {
           var wrappedSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref17 = _asyncToGenerator(function* (values) {
+            var _ref16 = _asyncToGenerator(function* (values) {
               if (_this7.preApprovedSessionUserIdSet.has(values.userId)) {
                 return [true, 200, 'Authorized'];
               }
@@ -1786,7 +1785,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
 
             return function wrappedSessionJoinHandler(_x20) {
-              return _ref17.apply(this, arguments);
+              return _ref16.apply(this, arguments);
             };
           }();
 
@@ -2222,9 +2221,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref19) {
-            var newClientId = _ref19.clientId,
-                _p = _ref19.peer;
+          var handlePeer = function handlePeer(_ref18) {
+            var newClientId = _ref18.clientId,
+                _p = _ref18.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2237,9 +2236,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref20) {
-            var newClientId = _ref20.clientId,
-                _p = _ref20.peer;
+          var handleConnect = function handleConnect(_ref19) {
+            var newClientId = _ref19.clientId,
+                _p = _ref19.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2282,13 +2281,43 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
   }, {
     key: "reset",
     value: function reset() {
+      var _this12 = this;
+
       this.handleBraidSet(this.name, []);
       clearTimeout(this.leaveSessionAfterLastClientTimeout);
+
+      var _iterator17 = _createForOfIteratorHelper(this.peerDisconnectTimeoutMap),
+          _step17;
+
+      try {
+        var _loop = function _loop() {
+          var _step17$value = _slicedToArray(_step17.value, 2),
+              clientId = _step17$value[0],
+              timeout = _step17$value[1];
+
+          clearTimeout(timeout);
+
+          _this12.addToQueue(clientId, function () {
+            return _this12.disconnectFromPeer(clientId);
+          });
+        };
+
+        for (_iterator17.s(); !(_step17 = _iterator17.n()).done;) {
+          _loop();
+        }
+      } catch (err) {
+        _iterator17.e(err);
+      } finally {
+        _iterator17.f();
+      }
+
+      this.peerDisconnectTimeoutMap.clear();
     }
   }, {
     key: "close",
     value: function () {
       var _close = _asyncToGenerator(function* () {
+        this.logger.info('Closing');
         this.active = false;
         this.reset();
         this.emit('close');
@@ -2411,7 +2440,7 @@ Bond.declineInviteToSession = function (braidClient, abortSignal, data) {
 };
 
 Bond.getLocalRoomId = /*#__PURE__*/function () {
-  var _ref21 = _asyncToGenerator(function* (braidClient, _roomId, userId, abortSignal) {
+  var _ref20 = _asyncToGenerator(function* (braidClient, _roomId, userId, abortSignal) {
     var options = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : {};
     var bond = new Bond(braidClient, _constants.AUTOMATIC_DISCOVERY_ROOM_ID, userId, Object.assign({}, options, {
       localConnectionsOnly: true
@@ -2425,9 +2454,9 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
         bond.data.set(localKey, roomId);
       };
 
-      var handleConnect = function handleConnect(_ref22) {
-        var clientId = _ref22.clientId,
-            socketHash = _ref22.socketHash;
+      var handleConnect = function handleConnect(_ref21) {
+        var clientId = _ref21.clientId,
+            socketHash = _ref21.socketHash;
         var socket = bond.socketMap.get(socketHash);
 
         if (typeof socket === 'undefined') {
@@ -2448,9 +2477,9 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
         }
       };
 
-      var handleSessionJoin = function handleSessionJoin(_ref23) {
-        var clientId = _ref23.clientId,
-            sessionId = _ref23.sessionId;
+      var handleSessionJoin = function handleSessionJoin(_ref22) {
+        var clientId = _ref22.clientId,
+            sessionId = _ref22.sessionId;
 
         if (typeof sessionId === 'string' && bond.sessionId === sessionId) {
           return;
@@ -2518,7 +2547,7 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
       };
 
       var handleAbort = /*#__PURE__*/function () {
-        var _ref24 = _asyncToGenerator(function* () {
+        var _ref23 = _asyncToGenerator(function* () {
           abortSignal.removeEventListener('abort', handleAbort);
           bond.removeListener('close', handleClose);
           bond.removeListener('connect', handleConnect);
@@ -2543,7 +2572,7 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
         });
 
         return function handleAbort() {
-          return _ref24.apply(this, arguments);
+          return _ref23.apply(this, arguments);
         };
       }();
 
@@ -2560,7 +2589,7 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
   });
 
   return function (_x24, _x25, _x26, _x27) {
-    return _ref21.apply(this, arguments);
+    return _ref20.apply(this, arguments);
   };
 }();
 //# sourceMappingURL=index.js.map

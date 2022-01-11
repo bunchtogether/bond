@@ -312,10 +312,10 @@ export class Bond extends EventEmitter {
       if (this.active) {
         this.peerDisconnectTimeoutMap.set(clientId, setTimeout(() => {
           this.peerDisconnectTimeoutMap.delete(clientId);
-          this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
+          this.addToQueue(clientId, () => this.disconnectFromPeer(clientId));
         }, 15000));
       } else {
-        this.addToQueue(clientId, () => this.disconnectFromPeer(socketData));
+        this.addToQueue(clientId, () => this.disconnectFromPeer(clientId));
       }
     };
 
@@ -733,18 +733,19 @@ export class Bond extends EventEmitter {
         resolve();
       };
       const handleSignal = async (data:Object) => {
-        if (this.localConnectionsOnly) {
-          if (data.type === 'candidate') {
-            const { candidate: { candidate } } = data;
-            const addressParts = candidate.split(' ');
-            if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
-              addressParts[4] = '127.0.0.1';
-              data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
-            }
-          } else if (data.type === 'answer' || data.type === 'offer') {
-            data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1127.0.0.1 $3'); // eslint-disable-line no-param-reassign
-          }
-        }
+        // if (this.localConnectionsOnly) {
+        //  if (data.type === 'candidate') {
+        //    const { candidate: { candidate } } = data;
+        //    const addressParts = candidate.split(' ');
+        //    if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
+        //      addressParts[4] = '127.0.0.1';
+        //      data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
+        //    }
+        //  } else if (data.type === 'answer' || data.type === 'offer') {
+        //    data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1127.0.0.1 $3'); // eslint-disable-line no-param-reassign
+        //  }
+        // }
+        console.log(JSON.stringify(data, null, 2));
         try {
           await this.publish(SIGNAL, { serverId, socketId, data }, { CustomError: SignalError });
         } catch (error) {
@@ -825,7 +826,7 @@ export class Bond extends EventEmitter {
     peer.removeStream(stream);
   }
 
-  async disconnectFromPeer({ clientId }:Socket) {
+  async disconnectFromPeer(clientId:number) {
     const peer = this.peerMap.get(clientId);
     if (typeof peer === 'undefined') {
       return;
@@ -1374,9 +1375,15 @@ export class Bond extends EventEmitter {
   reset() {
     this.handleBraidSet(this.name, []);
     clearTimeout(this.leaveSessionAfterLastClientTimeout);
+    for (const [clientId, timeout] of this.peerDisconnectTimeoutMap) {
+      clearTimeout(timeout);
+      this.addToQueue(clientId, () => this.disconnectFromPeer(clientId));
+    }
+    this.peerDisconnectTimeoutMap.clear();
   }
 
   async close() {
+    this.logger.info('Closing');
     this.active = false;
 
     this.reset();
