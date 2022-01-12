@@ -51,6 +51,7 @@ import {
   ObservedRemoveDump,
   PeerEvent,
   Close,
+  MultipartContainer,
 } from './messagepack';
 
 type Logger = {
@@ -248,6 +249,33 @@ export class Bond extends EventEmitter {
         }
         peer.send(pack(unpacked));
       };
+
+      const mergeChunkPromises = new Map();
+
+      const handleMultipartContainer = async (multipartContainer:MultipartContainer) => {
+        const existingMergeChunksPromise = mergeChunkPromises.get(multipartContainer.id);
+        if (typeof existingMergeChunksPromise !== 'undefined') {
+          existingMergeChunksPromise.push(multipartContainer);
+          return;
+        }
+        const mergeChunksPromise = MultipartContainer.getMergeChunksPromise(60000);
+        mergeChunksPromise.push(multipartContainer);
+        mergeChunkPromises.set(multipartContainer.id, mergeChunksPromise);
+        try {
+          const packed = await mergeChunksPromise;
+          handlePeerData(packed);
+        } catch (error) {
+          if (error.stack) {
+            this.logger.error('Unable to merge multipart message chunks:');
+            error.stack.split('\n').forEach((line) => this.logger.error(`\t${line}`));
+          } else {
+            this.logger.error(`Unable to merge multipart message chunks: ${error.message}`);
+          }
+        } finally {
+          mergeChunkPromises.delete(multipartContainer.id);
+        }
+      };
+
       const handlePeerData = (packed:Buffer) => {
         const message = unpack(packed);
         if (message instanceof Ping) {
@@ -263,8 +291,11 @@ export class Bond extends EventEmitter {
           this.logger.info(`Client ${clientId} closing with code ${message.code}: ${message.message}`);
           this.peerMap.delete(clientId);
           peerIsClosing = true;
+        } else if (message instanceof MultipartContainer) {
+          handleMultipartContainer(message);
         }
       };
+
       this.addListener('sessionClientLeave', handleSessionClientLeave);
       if (!this.isConnectedToClient(clientId)) {
         await new Promise((resolve) => {
@@ -820,15 +851,31 @@ export class Bond extends EventEmitter {
 
   async emitToPeer(clientId:number, type:string, ...args:Array<any>) {
     const peer = await this.getConnectedPeer(clientId);
-    await new Promise((resolve, reject) => {
-      peer.write(pack(new PeerEvent(type, args)), null, (error?:Error) => {
-        if (typeof error !== 'undefined') {
-          reject(error);
-        } else {
-          resolve();
-        }
+    const message = pack(new PeerEvent(type, args));
+    if (message.length > 65536) {
+      const chunks = MultipartContainer.chunk(message, 65536);
+      for (const chunk of chunks) {
+        await new Promise((resolve, reject) => {
+          peer.write(chunk, null, (error?:Error) => {
+            if (typeof error !== 'undefined') {
+              reject(error);
+            } else {
+              resolve();
+            }
+          });
+        });
+      }
+    } else {
+      await new Promise((resolve, reject) => {
+        peer.write(message, null, (error?:Error) => {
+          if (typeof error !== 'undefined') {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
       });
-    });
+    }
   }
 
   async addStream(clientId:number, stream:MediaStream) {

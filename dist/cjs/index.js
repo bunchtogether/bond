@@ -273,6 +273,45 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           peer.send((0, _msgpackr.pack)(unpacked));
         };
 
+        var mergeChunkPromises = new Map();
+
+        var handleMultipartContainer = /*#__PURE__*/function () {
+          var _ref2 = _asyncToGenerator(function* (multipartContainer) {
+            var existingMergeChunksPromise = mergeChunkPromises.get(multipartContainer.id);
+
+            if (typeof existingMergeChunksPromise !== 'undefined') {
+              existingMergeChunksPromise.push(multipartContainer);
+              return;
+            }
+
+            var mergeChunksPromise = _messagepack.MultipartContainer.getMergeChunksPromise(60000);
+
+            mergeChunksPromise.push(multipartContainer);
+            mergeChunkPromises.set(multipartContainer.id, mergeChunksPromise);
+
+            try {
+              var packed = yield mergeChunksPromise;
+              handlePeerData(packed);
+            } catch (error) {
+              if (error.stack) {
+                _this.logger.error('Unable to merge multipart message chunks:');
+
+                error.stack.split('\n').forEach(function (line) {
+                  return _this.logger.error("\t".concat(line));
+                });
+              } else {
+                _this.logger.error("Unable to merge multipart message chunks: ".concat(error.message));
+              }
+            } finally {
+              mergeChunkPromises.delete(multipartContainer.id);
+            }
+          });
+
+          return function handleMultipartContainer(_x2) {
+            return _ref2.apply(this, arguments);
+          };
+        }();
+
         var handlePeerData = function handlePeerData(packed) {
           var message = (0, _msgpackr.unpack)(packed);
 
@@ -294,6 +333,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _this.peerMap.delete(clientId);
 
             peerIsClosing = true;
+          } else if (message instanceof _messagepack.MultipartContainer) {
+            handleMultipartContainer(message);
           }
         };
 
@@ -301,8 +342,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (!_this.isConnectedToClient(clientId)) {
           yield new Promise(function (resolve) {
-            var handleConnect = function handleConnect(_ref2) {
-              var newClientId = _ref2.clientId;
+            var handleConnect = function handleConnect(_ref3) {
+              var newClientId = _ref3.clientId;
 
               if (newClientId !== clientId) {
                 return;
@@ -952,7 +993,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function publish(_x2, _x3) {
+      function publish(_x3, _x4) {
         return _publish.apply(this, arguments);
       }
 
@@ -1004,8 +1045,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               resolve();
             };
 
-            var handleSocketLeave = function handleSocketLeave(_ref4) {
-              var oldSocketHash = _ref4.socketHash;
+            var handleSocketLeave = function handleSocketLeave(_ref5) {
+              var oldSocketHash = _ref5.socketHash;
 
               if (socketHash !== oldSocketHash) {
                 return;
@@ -1061,7 +1102,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref5 = _asyncToGenerator(function* (data) {
+            var _ref6 = _asyncToGenerator(function* (data) {
               try {
                 yield _this6.publish(_constants.SIGNAL, {
                   serverId: serverId,
@@ -1077,8 +1118,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSignal(_x5) {
-              return _ref5.apply(this, arguments);
+            return function handleSignal(_x6) {
+              return _ref6.apply(this, arguments);
             };
           }();
 
@@ -1199,7 +1240,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleSignal = /*#__PURE__*/function () {
-            var _ref6 = _asyncToGenerator(function* (data) {
+            var _ref7 = _asyncToGenerator(function* (data) {
               if (_this6.localConnectionsOnly) {
                 if (data.type === 'candidate') {
                   var candidate = data.candidate.candidate;
@@ -1236,8 +1277,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSignal(_x6) {
-              return _ref6.apply(this, arguments);
+            return function handleSignal(_x7) {
+              return _ref7.apply(this, arguments);
             };
           }();
 
@@ -1282,8 +1323,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             resolve();
           };
 
-          var handleSocketLeave = function handleSocketLeave(_ref7) {
-            var oldSocketHash = _ref7.socketHash;
+          var handleSocketLeave = function handleSocketLeave(_ref8) {
+            var oldSocketHash = _ref8.socketHash;
 
             if (socketHash !== oldSocketHash) {
               return;
@@ -1316,7 +1357,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function connectToPeer(_x4) {
+      function connectToPeer(_x5) {
         return _connectToPeer.apply(this, arguments);
       }
 
@@ -1326,23 +1367,56 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "emitToPeer",
     value: function () {
       var _emitToPeer = _asyncToGenerator(function* (clientId, type) {
+        var peer = yield this.getConnectedPeer(clientId);
+
         for (var _len = arguments.length, args = new Array(_len > 2 ? _len - 2 : 0), _key = 2; _key < _len; _key++) {
           args[_key - 2] = arguments[_key];
         }
 
-        var peer = yield this.getConnectedPeer(clientId);
-        yield new Promise(function (resolve, reject) {
-          peer.write((0, _msgpackr.pack)(new _messagepack.PeerEvent(type, args)), null, function (error) {
-            if (typeof error !== 'undefined') {
-              reject(error);
-            } else {
-              resolve();
+        var message = (0, _msgpackr.pack)(new _messagepack.PeerEvent(type, args));
+
+        if (message.length > 65536) {
+          var chunks = _messagepack.MultipartContainer.chunk(message, 65536);
+
+          var _iterator15 = _createForOfIteratorHelper(chunks),
+              _step15;
+
+          try {
+            var _loop = function* _loop() {
+              var chunk = _step15.value;
+              yield new Promise(function (resolve, reject) {
+                peer.write(chunk, null, function (error) {
+                  if (typeof error !== 'undefined') {
+                    reject(error);
+                  } else {
+                    resolve();
+                  }
+                });
+              });
+            };
+
+            for (_iterator15.s(); !(_step15 = _iterator15.n()).done;) {
+              yield* _loop();
             }
+          } catch (err) {
+            _iterator15.e(err);
+          } finally {
+            _iterator15.f();
+          }
+        } else {
+          yield new Promise(function (resolve, reject) {
+            peer.write(message, null, function (error) {
+              if (typeof error !== 'undefined') {
+                reject(error);
+              } else {
+                resolve();
+              }
+            });
           });
-        });
+        }
       });
 
-      function emitToPeer(_x7, _x8) {
+      function emitToPeer(_x8, _x9) {
         return _emitToPeer.apply(this, arguments);
       }
 
@@ -1365,7 +1439,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         peer.addStream(stream);
       });
 
-      function addStream(_x9, _x10) {
+      function addStream(_x10, _x11) {
         return _addStream.apply(this, arguments);
       }
 
@@ -1385,7 +1459,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         peer.removeStream(stream);
       });
 
-      function removeStream(_x11, _x12) {
+      function removeStream(_x12, _x13) {
         return _removeStream.apply(this, arguments);
       }
 
@@ -1410,7 +1484,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         peer.destroy();
       });
 
-      function disconnectFromPeer(_x13) {
+      function disconnectFromPeer(_x14) {
         return _disconnectFromPeer.apply(this, arguments);
       }
 
@@ -1421,19 +1495,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     value: function () {
       var _onIdle = _asyncToGenerator(function* () {
         while (this.queueMap.size > 0) {
-          var _iterator15 = _createForOfIteratorHelper(this.queueMap.values()),
-              _step15;
+          var _iterator16 = _createForOfIteratorHelper(this.queueMap.values()),
+              _step16;
 
           try {
-            for (_iterator15.s(); !(_step15 = _iterator15.n()).done;) {
-              var queue = _step15.value;
+            for (_iterator16.s(); !(_step16 = _iterator16.n()).done;) {
+              var queue = _step16.value;
               yield queue.onIdle();
             } // $FlowFixMe
 
           } catch (err) {
-            _iterator15.e(err);
+            _iterator16.e(err);
           } finally {
-            _iterator15.f();
+            _iterator16.f();
           }
 
           yield new Promise(function (resolve) {
@@ -1493,7 +1567,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function removeFromSession(_x14) {
+      function removeFromSession(_x15) {
         return _removeFromSession.apply(this, arguments);
       }
 
@@ -1528,7 +1602,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function cancelInviteToSession(_x15) {
+      function cancelInviteToSession(_x16) {
         return _cancelInviteToSession.apply(this, arguments);
       }
 
@@ -1557,9 +1631,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         var didCancel = false;
 
-        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref8) {
-          var cancelledSessionId = _ref8.sessionId,
-              cancelledUserId = _ref8.userId;
+        var handleCancelInviteBeforePublish = function handleCancelInviteBeforePublish(_ref9) {
+          var cancelledSessionId = _ref9.sessionId,
+              cancelledUserId = _ref9.userId;
 
           if (cancelledSessionId !== sessionId) {
             return;
@@ -1573,7 +1647,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         };
 
         var leaveSession = /*#__PURE__*/function () {
-          var _ref9 = _asyncToGenerator(function* () {
+          var _ref10 = _asyncToGenerator(function* () {
             if (hasSessionId) {
               return;
             }
@@ -1588,7 +1662,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           });
 
           return function leaveSession() {
-            return _ref9.apply(this, arguments);
+            return _ref10.apply(this, arguments);
           };
         }();
 
@@ -1652,9 +1726,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           }), timeoutDuration);
 
           var handleCancelInvite = /*#__PURE__*/function () {
-            var _ref12 = _asyncToGenerator(function* (_ref11) {
-              var cancelledSessionId = _ref11.sessionId,
-                  cancelledUserId = _ref11.userId;
+            var _ref13 = _asyncToGenerator(function* (_ref12) {
+              var cancelledSessionId = _ref12.sessionId,
+                  cancelledUserId = _ref12.userId;
 
               if (cancelledSessionId !== sessionId) {
                 return;
@@ -1669,8 +1743,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               reject(new _errors.InvitationCancelledError("Invitation to user ".concat(userId, " was cancelled")));
             });
 
-            return function handleCancelInvite(_x17) {
-              return _ref12.apply(this, arguments);
+            return function handleCancelInvite(_x18) {
+              return _ref13.apply(this, arguments);
             };
           }();
 
@@ -1689,19 +1763,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
 
           var handleSocketLeave = /*#__PURE__*/function () {
-            var _ref13 = _asyncToGenerator(function* (socket) {
+            var _ref14 = _asyncToGenerator(function* (socket) {
               if (socket.userId !== _this7.userId) {
                 return;
               }
 
               var isOnlySocketForUserId = true;
 
-              var _iterator16 = _createForOfIteratorHelper(_this7.socketMap.values()),
-                  _step16;
+              var _iterator17 = _createForOfIteratorHelper(_this7.socketMap.values()),
+                  _step17;
 
               try {
-                for (_iterator16.s(); !(_step16 = _iterator16.n()).done;) {
-                  var socketData = _step16.value;
+                for (_iterator17.s(); !(_step17 = _iterator17.n()).done;) {
+                  var socketData = _step17.value;
 
                   if (socketData.userId !== _this7.userId) {
                     continue;
@@ -1714,9 +1788,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
                   isOnlySocketForUserId = false;
                 }
               } catch (err) {
-                _iterator16.e(err);
+                _iterator17.e(err);
               } finally {
-                _iterator16.f();
+                _iterator17.f();
               }
 
               if (isOnlySocketForUserId) {
@@ -1726,8 +1800,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               }
             });
 
-            return function handleSocketLeave(_x18) {
-              return _ref13.apply(this, arguments);
+            return function handleSocketLeave(_x19) {
+              return _ref14.apply(this, arguments);
             };
           }();
 
@@ -1746,19 +1820,19 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           var handleDecline = /*#__PURE__*/function () {
-            var _ref14 = _asyncToGenerator(function* () {
+            var _ref15 = _asyncToGenerator(function* () {
               cleanup();
               yield leaveSession();
               reject(new _errors.InvitationDeclinedError('Invitation declined'));
             });
 
             return function handleDecline() {
-              return _ref14.apply(this, arguments);
+              return _ref15.apply(this, arguments);
             };
           }();
 
           var handleLeave = /*#__PURE__*/function () {
-            var _ref15 = _asyncToGenerator(function* (peerUserId) {
+            var _ref16 = _asyncToGenerator(function* (peerUserId) {
               if (userId !== peerUserId) {
                 return;
               }
@@ -1768,8 +1842,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               reject(new _errors.InvitedUserLeftError("User ".concat(userId, " left before accepting the invitation")));
             });
 
-            return function handleLeave(_x19) {
-              return _ref15.apply(this, arguments);
+            return function handleLeave(_x20) {
+              return _ref16.apply(this, arguments);
             };
           }();
 
@@ -1791,7 +1865,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function inviteToSession(_x16) {
+      function inviteToSession(_x17) {
         return _inviteToSession.apply(this, arguments);
       }
 
@@ -1824,7 +1898,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
 
         if (typeof sessionJoinHandler === 'function') {
           var wrappedSessionJoinHandler = /*#__PURE__*/function () {
-            var _ref16 = _asyncToGenerator(function* (values) {
+            var _ref17 = _asyncToGenerator(function* (values) {
               if (_this8.preApprovedSessionUserIdSet.has(values.userId)) {
                 return [true, 200, 'Authorized'];
               }
@@ -1840,8 +1914,8 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               return [true, 200, 'Authorized'];
             });
 
-            return function wrappedSessionJoinHandler(_x22) {
-              return _ref16.apply(this, arguments);
+            return function wrappedSessionJoinHandler(_x23) {
+              return _ref17.apply(this, arguments);
             };
           }();
 
@@ -1853,7 +1927,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function startSession(_x20, _x21) {
+      function startSession(_x21, _x22) {
         return _startSession.apply(this, arguments);
       }
 
@@ -1901,7 +1975,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function joinSession(_x23) {
+      function joinSession(_x24) {
         return _joinSession.apply(this, arguments);
       }
 
@@ -2231,7 +2305,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         }
       });
 
-      function handleMessage(_x24) {
+      function handleMessage(_x25) {
         return _handleMessage.apply(this, arguments);
       }
 
@@ -2277,9 +2351,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             reject(error);
           };
 
-          var handlePeer = function handlePeer(_ref18) {
-            var newClientId = _ref18.clientId,
-                _p = _ref18.peer;
+          var handlePeer = function handlePeer(_ref19) {
+            var newClientId = _ref19.clientId,
+                _p = _ref19.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2292,9 +2366,9 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _p.addListener('error', handlePeerError);
           };
 
-          var handleConnect = function handleConnect(_ref19) {
-            var newClientId = _ref19.clientId,
-                _p = _ref19.peer;
+          var handleConnect = function handleConnect(_ref20) {
+            var newClientId = _ref20.clientId,
+                _p = _ref20.peer;
 
             if (newClientId !== clientId) {
               return;
@@ -2321,7 +2395,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         });
       });
 
-      function getConnectedPeer(_x25) {
+      function getConnectedPeer(_x26) {
         return _getConnectedPeer.apply(this, arguments);
       }
 
@@ -2350,14 +2424,14 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
         this.active = false;
         this.reset();
 
-        var _iterator17 = _createForOfIteratorHelper(this.peerDisconnectTimeoutMap),
-            _step17;
+        var _iterator18 = _createForOfIteratorHelper(this.peerDisconnectTimeoutMap),
+            _step18;
 
         try {
-          var _loop = function _loop() {
-            var _step17$value = _slicedToArray(_step17.value, 2),
-                clientId = _step17$value[0],
-                timeout = _step17$value[1];
+          var _loop2 = function _loop2() {
+            var _step18$value = _slicedToArray(_step18.value, 2),
+                clientId = _step18$value[0],
+                timeout = _step18$value[1];
 
             clearTimeout(timeout);
 
@@ -2366,13 +2440,13 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             });
           };
 
-          for (_iterator17.s(); !(_step17 = _iterator17.n()).done;) {
-            _loop();
+          for (_iterator18.s(); !(_step18 = _iterator18.n()).done;) {
+            _loop2();
           }
         } catch (err) {
-          _iterator17.e(err);
+          _iterator18.e(err);
         } finally {
-          _iterator17.f();
+          _iterator18.f();
         }
 
         this.peerDisconnectTimeoutMap.clear();
@@ -2496,7 +2570,7 @@ Bond.declineInviteToSession = function (braidClient, abortSignal, data) {
 };
 
 Bond.getLocalRoomId = /*#__PURE__*/function () {
-  var _ref20 = _asyncToGenerator(function* (braidClient, _roomId, userId, abortSignal) {
+  var _ref21 = _asyncToGenerator(function* (braidClient, _roomId, userId, abortSignal) {
     var options = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : {};
     var bond = new Bond(braidClient, _constants.AUTOMATIC_DISCOVERY_ROOM_ID, userId, Object.assign({}, options, {
       localConnectionsOnly: true
@@ -2510,9 +2584,9 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
         bond.data.set(localKey, roomId);
       };
 
-      var handleConnect = function handleConnect(_ref21) {
-        var clientId = _ref21.clientId,
-            socketHash = _ref21.socketHash;
+      var handleConnect = function handleConnect(_ref22) {
+        var clientId = _ref22.clientId,
+            socketHash = _ref22.socketHash;
         var socket = bond.socketMap.get(socketHash);
 
         if (typeof socket === 'undefined') {
@@ -2533,9 +2607,9 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
         }
       };
 
-      var handleSessionJoin = function handleSessionJoin(_ref22) {
-        var clientId = _ref22.clientId,
-            sessionId = _ref22.sessionId;
+      var handleSessionJoin = function handleSessionJoin(_ref23) {
+        var clientId = _ref23.clientId,
+            sessionId = _ref23.sessionId;
 
         if (typeof sessionId === 'string' && bond.sessionId === sessionId) {
           return;
@@ -2603,7 +2677,7 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
       };
 
       var handleAbort = /*#__PURE__*/function () {
-        var _ref23 = _asyncToGenerator(function* () {
+        var _ref24 = _asyncToGenerator(function* () {
           abortSignal.removeEventListener('abort', handleAbort);
           bond.removeListener('close', handleClose);
           bond.removeListener('connect', handleConnect);
@@ -2628,7 +2702,7 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
         });
 
         return function handleAbort() {
-          return _ref23.apply(this, arguments);
+          return _ref24.apply(this, arguments);
         };
       }();
 
@@ -2644,8 +2718,8 @@ Bond.getLocalRoomId = /*#__PURE__*/function () {
     return negotiatedRoomId;
   });
 
-  return function (_x26, _x27, _x28, _x29) {
-    return _ref20.apply(this, arguments);
+  return function (_x27, _x28, _x29, _x30) {
+    return _ref21.apply(this, arguments);
   };
 }();
 //# sourceMappingURL=index.js.map

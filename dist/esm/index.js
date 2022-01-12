@@ -7,7 +7,7 @@ import PQueue from 'p-queue';
 import { pack, unpack } from 'msgpackr';
 import { SIGNAL, START_SESSION, LEAVE_SESSION, JOIN_SESSION, INVITE_TO_SESSION, DECLINE_INVITE_TO_SESSION, SESSION_QUEUE, ABORT_SESSION_JOIN_REQUEST, SESSION_JOIN_REQUEST, SESSION_JOIN_RESPONSE, REMOVE_FROM_SESSION, CANCEL_INVITE_TO_SESSION, RESPONSE, AUTOMATIC_DISCOVERY_ROOM_ID } from './constants';
 import { AbortError, RequestError, StartSessionError, RequestTimeoutError, JoinSessionError, LeaveSessionError, SignalError, SessionJoinResponseError, ClientClosedError, InviteToSessionError, InvitationDeclinedError, InvitedUserLeftError, InvitationTimeoutError, DeclineInviteToSessionError, RemoveFromSessionError, CancelInviteToSessionError, InvitationCancelledError, AbortSessionJoinError } from './errors';
-import { Ping, Pong, ObservedRemoveDump, PeerEvent, Close } from './messagepack';
+import { Ping, Pong, ObservedRemoveDump, PeerEvent, Close, MultipartContainer } from './messagepack';
 
 const getSocketMap = values => {
   if (typeof values === 'undefined') {
@@ -174,6 +174,35 @@ export class Bond extends EventEmitter {
         peer.send(pack(unpacked));
       };
 
+      const mergeChunkPromises = new Map();
+
+      const handleMultipartContainer = async multipartContainer => {
+        const existingMergeChunksPromise = mergeChunkPromises.get(multipartContainer.id);
+
+        if (typeof existingMergeChunksPromise !== 'undefined') {
+          existingMergeChunksPromise.push(multipartContainer);
+          return;
+        }
+
+        const mergeChunksPromise = MultipartContainer.getMergeChunksPromise(60000);
+        mergeChunksPromise.push(multipartContainer);
+        mergeChunkPromises.set(multipartContainer.id, mergeChunksPromise);
+
+        try {
+          const packed = await mergeChunksPromise;
+          handlePeerData(packed);
+        } catch (error) {
+          if (error.stack) {
+            this.logger.error('Unable to merge multipart message chunks:');
+            error.stack.split('\n').forEach(line => this.logger.error(`\t${line}`));
+          } else {
+            this.logger.error(`Unable to merge multipart message chunks: ${error.message}`);
+          }
+        } finally {
+          mergeChunkPromises.delete(multipartContainer.id);
+        }
+      };
+
       const handlePeerData = packed => {
         const message = unpack(packed);
 
@@ -190,6 +219,8 @@ export class Bond extends EventEmitter {
           this.logger.info(`Client ${clientId} closing with code ${message.code}: ${message.message}`);
           this.peerMap.delete(clientId);
           peerIsClosing = true;
+        } else if (message instanceof MultipartContainer) {
+          handleMultipartContainer(message);
         }
       };
 
@@ -928,15 +959,33 @@ export class Bond extends EventEmitter {
 
   async emitToPeer(clientId, type, ...args) {
     const peer = await this.getConnectedPeer(clientId);
-    await new Promise((resolve, reject) => {
-      peer.write(pack(new PeerEvent(type, args)), null, error => {
-        if (typeof error !== 'undefined') {
-          reject(error);
-        } else {
-          resolve();
-        }
+    const message = pack(new PeerEvent(type, args));
+
+    if (message.length > 65536) {
+      const chunks = MultipartContainer.chunk(message, 65536);
+
+      for (const chunk of chunks) {
+        await new Promise((resolve, reject) => {
+          peer.write(chunk, null, error => {
+            if (typeof error !== 'undefined') {
+              reject(error);
+            } else {
+              resolve();
+            }
+          });
+        });
+      }
+    } else {
+      await new Promise((resolve, reject) => {
+        peer.write(message, null, error => {
+          if (typeof error !== 'undefined') {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
       });
-    });
+    }
   }
 
   async addStream(clientId, stream) {

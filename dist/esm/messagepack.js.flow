@@ -1,6 +1,7 @@
 // @flow
 
 import {
+  pack,
   addExtension,
 } from 'msgpackr';
 
@@ -118,4 +119,111 @@ addExtension({
   type: 0x94,
   write: writeClose,
   read: readClose,
+});
+
+let incrementedChunkId = (Math.random() * 4294967296) >>> 0;
+
+export class MergeChunksPromise extends Promise<Buffer> {
+  declare chunkCallbacks: Array<(MultipartContainer) => void>;
+  constructor(timeoutDuration: number) {
+    const chunkCallbacks = [];
+    super((resolve, reject) => {
+      let id;
+      let merged;
+      let bytesReceived = 0;
+      const timeoutHandler = () => {
+        reject(new Error(`MultipartContainer chunk timeout error after ${timeoutDuration}ms`));
+      };
+      let timeout = setTimeout(timeoutHandler, timeoutDuration);
+      const addChunk = (multipartContainer:MultipartContainer) => {
+        if (typeof id === 'undefined' || typeof merged === 'undefined') {
+          id = multipartContainer.id;
+          merged = Buffer.alloc(multipartContainer.length);
+        } else if (multipartContainer.id !== id) {
+          return;
+        }
+        clearTimeout(timeout);
+        multipartContainer.buffer.copy(merged, multipartContainer.position);
+        bytesReceived += multipartContainer.buffer.length;
+        if (bytesReceived < multipartContainer.length) {
+          timeout = setTimeout(timeoutHandler, timeoutDuration);
+          return;
+        }
+        resolve(merged);
+      };
+      chunkCallbacks.push(addChunk);
+    });
+    this.chunkCallbacks = chunkCallbacks;
+  }
+
+  push(multipartContainer:MultipartContainer) {
+    for (const chunkCallback of this.chunkCallbacks) {
+      chunkCallback(multipartContainer);
+    }
+  }
+
+  // $FlowFixMe
+  static get [Symbol.species]() {
+    return Promise;
+  }
+
+  // $FlowFixMe
+  get [Symbol.toStringTag]() {
+    return 'MergeChunksPromise';
+  }
+}
+
+export class MultipartContainer {
+  static chunk: (Buffer, number) => Array<Buffer>;
+
+  static getMergeChunksPromise: (number) => MergeChunksPromise;
+
+  constructor(id:number, position:number, length: number, buffer:Buffer) {
+    this.id = id;
+    this.position = position;
+    this.length = length;
+    this.buffer = buffer;
+  }
+  declare id:number;
+  declare position:number;
+  declare length:number;
+  declare buffer:Buffer;
+}
+
+MultipartContainer.chunk = (buffer:Buffer, size:number) => {
+  const chunks = [];
+  for (let i = 0; i * size < buffer.length; i += 1) {
+    const slice = buffer.slice(i * size, (i + 1) * size);
+    chunks.push(pack(new MultipartContainer(incrementedChunkId, i * size, buffer.length, slice)));
+  }
+  incrementedChunkId += 1;
+  if (incrementedChunkId > 4294967294) {
+    incrementedChunkId = 0;
+  }
+  return chunks;
+};
+
+MultipartContainer.getMergeChunksPromise = (timeoutDuration: number) => new MergeChunksPromise(timeoutDuration);
+
+function decodeMultipartContainer(buffer: Buffer) {
+  const id = buffer.readUInt32BE(0);
+  const position = buffer.readUInt32BE(4);
+  const length = buffer.readUInt32BE(8);
+  return new MultipartContainer(id, position, length, buffer.slice(12));
+}
+
+function encodeMultipartContainer(multipartContainer: MultipartContainer) {
+  const buffer = Buffer.allocUnsafe(multipartContainer.buffer.length + 12);
+  buffer.writeUInt32BE(multipartContainer.id, 0);
+  buffer.writeUInt32BE(multipartContainer.position, 4);
+  buffer.writeUInt32BE(multipartContainer.length, 8);
+  multipartContainer.buffer.copy(buffer, 12);
+  return buffer;
+}
+
+addExtension({
+  Class: MultipartContainer,
+  type: 0x95,
+  pack: encodeMultipartContainer,
+  unpack: decodeMultipartContainer,
 });
