@@ -965,26 +965,26 @@ export class Bond extends EventEmitter {
       const chunks = MultipartContainer.chunk(message, 65536);
 
       for (const chunk of chunks) {
-        await new Promise((resolve, reject) => {
-          peer.write(chunk, null, error => {
-            if (typeof error !== 'undefined') {
-              reject(error);
-            } else {
+        const ok = peer.write(chunk);
+
+        if (!ok) {
+          await new Promise(resolve => {
+            peer.once('drain', () => {
               resolve();
-            }
+            });
+          });
+        }
+      }
+    } else {
+      const ok = peer.write(message);
+
+      if (!ok) {
+        await new Promise(resolve => {
+          peer.once('drain', () => {
+            resolve();
           });
         });
       }
-    } else {
-      await new Promise((resolve, reject) => {
-        peer.write(message, null, error => {
-          if (typeof error !== 'undefined') {
-            reject(error);
-          } else {
-            resolve();
-          }
-        });
-      });
     }
   }
 

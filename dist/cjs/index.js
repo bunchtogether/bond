@@ -1382,21 +1382,17 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               _step15;
 
           try {
-            var _loop = function* _loop() {
-              var chunk = _step15.value;
-              yield new Promise(function (resolve, reject) {
-                peer.write(chunk, null, function (error) {
-                  if (typeof error !== 'undefined') {
-                    reject(error);
-                  } else {
-                    resolve();
-                  }
-                });
-              });
-            };
-
             for (_iterator15.s(); !(_step15 = _iterator15.n()).done;) {
-              yield* _loop();
+              var chunk = _step15.value;
+              var ok = peer.write(chunk);
+
+              if (!ok) {
+                yield new Promise(function (resolve) {
+                  peer.once('drain', function () {
+                    resolve();
+                  });
+                });
+              }
             }
           } catch (err) {
             _iterator15.e(err);
@@ -1404,15 +1400,15 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _iterator15.f();
           }
         } else {
-          yield new Promise(function (resolve, reject) {
-            peer.write(message, null, function (error) {
-              if (typeof error !== 'undefined') {
-                reject(error);
-              } else {
+          var _ok = peer.write(message);
+
+          if (!_ok) {
+            yield new Promise(function (resolve) {
+              peer.once('drain', function () {
                 resolve();
-              }
+              });
             });
-          });
+          }
         }
       });
 
@@ -2428,7 +2424,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
             _step18;
 
         try {
-          var _loop2 = function _loop2() {
+          var _loop = function _loop() {
             var _step18$value = _slicedToArray(_step18.value, 2),
                 clientId = _step18$value[0],
                 timeout = _step18$value[1];
@@ -2441,7 +2437,7 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
           };
 
           for (_iterator18.s(); !(_step18 = _iterator18.n()).done;) {
-            _loop2();
+            _loop();
           }
         } catch (err) {
           _iterator18.e(err);
