@@ -820,7 +820,15 @@ export class Bond extends EventEmitter {
 
   async emitToPeer(clientId:number, type:string, ...args:Array<any>) {
     const peer = await this.getConnectedPeer(clientId);
-    peer.send(pack(new PeerEvent(type, args)));
+    await new Promise((resolve, reject) => {
+      peer.write(pack(new PeerEvent(type, args)), null, (error?:Error) => {
+        if (typeof error !== 'undefined') {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
   }
 
   async addStream(clientId:number, stream:MediaStream) {

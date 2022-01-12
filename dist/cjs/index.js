@@ -1326,13 +1326,20 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
     key: "emitToPeer",
     value: function () {
       var _emitToPeer = _asyncToGenerator(function* (clientId, type) {
-        var peer = yield this.getConnectedPeer(clientId);
-
         for (var _len = arguments.length, args = new Array(_len > 2 ? _len - 2 : 0), _key = 2; _key < _len; _key++) {
           args[_key - 2] = arguments[_key];
         }
 
-        peer.send((0, _msgpackr.pack)(new _messagepack.PeerEvent(type, args)));
+        var peer = yield this.getConnectedPeer(clientId);
+        yield new Promise(function (resolve, reject) {
+          peer.write((0, _msgpackr.pack)(new _messagepack.PeerEvent(type, args)), null, function (error) {
+            if (typeof error !== 'undefined') {
+              reject(error);
+            } else {
+              resolve();
+            }
+          });
+        });
       });
 
       function emitToPeer(_x7, _x8) {
