@@ -3,7 +3,7 @@
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.Pong = exports.Ping = exports.ObservedRemoveDump = void 0;
+exports.Pong = exports.Ping = exports.PeerEvent = exports.ObservedRemoveDump = exports.Close = void 0;
 
 var _msgpackr = require("msgpackr");
 
@@ -81,5 +81,53 @@ function readObservedRemoveDump(decoded) {
   type: 0x92,
   write: writeObservedRemoveDump,
   read: readObservedRemoveDump
+});
+
+var PeerEvent = /*#__PURE__*/_createClass(function PeerEvent(type, args) {
+  _classCallCheck(this, PeerEvent);
+
+  this.type = type;
+  this.args = args;
+});
+
+exports.PeerEvent = PeerEvent;
+
+function writePeerEvent(encoded) {
+  return [encoded.type, encoded.args];
+}
+
+function readPeerEvent(decoded) {
+  return new PeerEvent(decoded[0], decoded[1]);
+}
+
+(0, _msgpackr.addExtension)({
+  Class: PeerEvent,
+  type: 0x93,
+  write: writePeerEvent,
+  read: readPeerEvent
+});
+
+var Close = /*#__PURE__*/_createClass(function Close(code, message) {
+  _classCallCheck(this, Close);
+
+  this.code = code;
+  this.message = message;
+});
+
+exports.Close = Close;
+
+function writeClose(encoded) {
+  return [encoded.code, encoded.message];
+}
+
+function readClose(decoded) {
+  return new Close(decoded[0], decoded[1]);
+}
+
+(0, _msgpackr.addExtension)({
+  Class: Close,
+  type: 0x94,
+  write: writeClose,
+  read: readClose
 });
 //# sourceMappingURL=messagepack.js.map

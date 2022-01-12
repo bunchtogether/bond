@@ -49,6 +49,8 @@ import {
   Ping,
   Pong,
   ObservedRemoveDump,
+  PeerEvent,
+  Close,
 } from './messagepack';
 
 type Logger = {
@@ -142,6 +144,7 @@ export class Bond extends EventEmitter {
   declare handleBraidClose: () => void;
   declare handleBraidCloseRequested: () => void;
   declare handleBraidReconnect: (boolean) => void;
+  declare handlePeerData: (Buffer) => void;
   declare signalQueueMap: Map<number, Array<[string, Object]>>;
   declare requestCallbackMap: Map<number, (boolean, number, string) => void | Promise<void>>;
   declare inviteDeclineHandlerMap: Map<string, () => Promise<void>>;
@@ -207,6 +210,7 @@ export class Bond extends EventEmitter {
       let interval;
       let _peer; // eslint-disable-line no-underscore-dangle
       let offset = 0;
+      let peerIsClosing = false;
       const abortController = new AbortController();
       const abortSignal = abortController.signal;
       const cleanup = () => {
@@ -221,7 +225,7 @@ export class Bond extends EventEmitter {
       };
       const handlePeerClose = () => {
         cleanup();
-        if (this.sessionClientIds.has(clientId)) {
+        if (!peerIsClosing && this.active && this.sessionClientIds.has(clientId)) {
           this.handleSessionClientJoin(clientId);
         }
       };
@@ -238,6 +242,10 @@ export class Bond extends EventEmitter {
         if (typeof peer === 'undefined') {
           throw new Error('Peer does not exist');
         }
+        if (!peer.connected) {
+          this.logger.warn(`Unable to send message to client ${clientId}, connection is closing`);
+          return;
+        }
         peer.send(pack(unpacked));
       };
       const handlePeerData = (packed:Buffer) => {
@@ -249,6 +257,12 @@ export class Bond extends EventEmitter {
           this.sessionClientOffsetMap.set(clientId, offset);
         } else if (message instanceof ObservedRemoveDump) {
           this.data.process(message.queue);
+        } else if (message instanceof PeerEvent) {
+          this.emit(message.type, ...message.args);
+        } else if (message instanceof Close) {
+          this.logger.info(`Client ${clientId} closing with code ${message.code}: ${message.message}`);
+          this.peerMap.delete(clientId);
+          peerIsClosing = true;
         }
       };
       this.addListener('sessionClientLeave', handleSessionClientLeave);
@@ -685,7 +699,7 @@ export class Bond extends EventEmitter {
         this.logger.info(`Disconnected from user ${userId} client ${clientId}`);
         cleanup();
         this.emit('disconnect', { userId, serverId, socketId, clientId });
-        if (this.peerMap.has(clientId)) {
+        if (this.active && this.peerMap.has(clientId)) {
           this.peerMap.delete(clientId);
           this.connectToPeer(socket);
           this.logger.warn(`Reconnecting to user ${userId} client ${clientId}`);
@@ -733,19 +747,18 @@ export class Bond extends EventEmitter {
         resolve();
       };
       const handleSignal = async (data:Object) => {
-        // if (this.localConnectionsOnly) {
-        //  if (data.type === 'candidate') {
-        //    const { candidate: { candidate } } = data;
-        //    const addressParts = candidate.split(' ');
-        //    if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
-        //      addressParts[4] = '127.0.0.1';
-        //      data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
-        //    }
-        //  } else if (data.type === 'answer' || data.type === 'offer') {
-        //    data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1127.0.0.1 $3'); // eslint-disable-line no-param-reassign
-        //  }
-        // }
-        console.log(JSON.stringify(data, null, 2));
+        if (this.localConnectionsOnly) {
+          if (data.type === 'candidate') {
+            const { candidate: { candidate } } = data;
+            const addressParts = candidate.split(' ');
+            if (addressParts[4] !== '127.0.0.1' && addressParts[4] !== '::1') {
+              addressParts[4] = '127.0.0.1';
+              data.candidate.candidate = addressParts.join(' '); // eslint-disable-line no-param-reassign
+            }
+          } else if (data.type === 'answer' || data.type === 'offer') {
+            data.sdp = data.sdp.replace(/(a=candidate[^\s]+?\s[^\s]+?\s[^\s]+?\s[^\s]+?\s)([^\s]+?\s)(.*?\r?\n)/g, '$1127.0.0.1 $3'); // eslint-disable-line no-param-reassign
+          }
+        }
         try {
           await this.publish(SIGNAL, { serverId, socketId, data }, { CustomError: SignalError });
         } catch (error) {
@@ -805,6 +818,11 @@ export class Bond extends EventEmitter {
     });
   }
 
+  async emitToPeer(clientId:number, type:string, ...args:Array<any>) {
+    const peer = await this.getConnectedPeer(clientId);
+    peer.send(pack(new PeerEvent(type, args)));
+  }
+
   async addStream(clientId:number, stream:MediaStream) {
     const peer = await this.getConnectedPeer(clientId);
     const addTrackHandler = (event:Event) => {
@@ -832,6 +850,9 @@ export class Bond extends EventEmitter {
       return;
     }
     this.peerMap.delete(clientId);
+    if (peer.connected) {
+      peer.send(pack(new Close(1000, 'Disconnect requested')));
+    }
     peer.destroy();
   }
 
@@ -1375,11 +1396,6 @@ export class Bond extends EventEmitter {
   reset() {
     this.handleBraidSet(this.name, []);
     clearTimeout(this.leaveSessionAfterLastClientTimeout);
-    for (const [clientId, timeout] of this.peerDisconnectTimeoutMap) {
-      clearTimeout(timeout);
-      this.addToQueue(clientId, () => this.disconnectFromPeer(clientId));
-    }
-    this.peerDisconnectTimeoutMap.clear();
   }
 
   async close() {
@@ -1387,6 +1403,13 @@ export class Bond extends EventEmitter {
     this.active = false;
 
     this.reset();
+
+    for (const [clientId, timeout] of this.peerDisconnectTimeoutMap) {
+      clearTimeout(timeout);
+      this.addToQueue(clientId, () => this.disconnectFromPeer(clientId));
+    }
+    this.peerDisconnectTimeoutMap.clear();
+
     this.emit('close');
 
     try {
@@ -1499,7 +1522,7 @@ Bond.getLocalRoomId = async (braidClient: BraidClient, _roomId:string | false, u
       if (typeof sessionId === 'string' && bond.sessionId === sessionId) {
         return;
       }
-      if (!bond.isConnectedToClient(clientId)) {
+      if (!bond.peerMap.has(clientId)) {
         return;
       }
       if (typeof sessionId !== 'string') {
@@ -1517,14 +1540,14 @@ Bond.getLocalRoomId = async (braidClient: BraidClient, _roomId:string | false, u
         return;
       }
       const clientId = parseInt(key, 36);
-      if (!bond.isConnectedToClient(clientId) && clientId !== bond.clientId) {
+      if (!bond.peerMap.has(clientId)) {
         return;
       }
       if (roomId === false && remoteRoomId === false && clientId < bond.clientId) {
         roomId = globalThis.crypto.randomUUID(); // eslint-disable-line no-undef
         bond.data.set(localKey, roomId);
         return;
-      } else if (typeof roomId === 'string' && typeof remoteRoomId === 'string' && clientId > bond.clientId) {
+      } else if (typeof roomId === 'string' && typeof remoteRoomId === 'string' && roomId !== remoteRoomId && clientId > bond.clientId) {
         roomId = remoteRoomId;
         bond.data.set(localKey, remoteRoomId);
       } else if (roomId === false && typeof remoteRoomId === 'string') {

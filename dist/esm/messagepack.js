@@ -63,4 +63,48 @@ addExtension({
   write: writeObservedRemoveDump,
   read: readObservedRemoveDump
 });
+export class PeerEvent {
+  constructor(type, args) {
+    this.type = type;
+    this.args = args;
+  }
+
+}
+
+function writePeerEvent(encoded) {
+  return [encoded.type, encoded.args];
+}
+
+function readPeerEvent(decoded) {
+  return new PeerEvent(decoded[0], decoded[1]);
+}
+
+addExtension({
+  Class: PeerEvent,
+  type: 0x93,
+  write: writePeerEvent,
+  read: readPeerEvent
+});
+export class Close {
+  constructor(code, message) {
+    this.code = code;
+    this.message = message;
+  }
+
+}
+
+function writeClose(encoded) {
+  return [encoded.code, encoded.message];
+}
+
+function readClose(decoded) {
+  return new Close(decoded[0], decoded[1]);
+}
+
+addExtension({
+  Class: Close,
+  type: 0x94,
+  write: writeClose,
+  read: readClose
+});
 //# sourceMappingURL=messagepack.js.map

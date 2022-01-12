@@ -71,3 +71,51 @@ addExtension({
   write: writeObservedRemoveDump,
   read: readObservedRemoveDump,
 });
+
+export class PeerEvent {
+  constructor(type:string, args:Array<any>) {
+    this.type = type;
+    this.args = args;
+  }
+  declare type:string;
+  declare args: Array<any>;
+}
+
+function writePeerEvent(encoded: PeerEvent) {
+  return [encoded.type, encoded.args];
+}
+
+function readPeerEvent(decoded:[string, Array<any>]) {
+  return new PeerEvent(decoded[0], decoded[1]);
+}
+
+addExtension({
+  Class: PeerEvent,
+  type: 0x93,
+  write: writePeerEvent,
+  read: readPeerEvent,
+});
+
+export class Close {
+  constructor(code:number, message:string) {
+    this.code = code;
+    this.message = message;
+  }
+  declare code: number;
+  declare message: string;
+}
+
+function writeClose(encoded: Close) {
+  return [encoded.code, encoded.message];
+}
+
+function readClose(decoded:[number, string]) {
+  return new Close(decoded[0], decoded[1]);
+}
+
+addExtension({
+  Class: Close,
+  type: 0x94,
+  write: writeClose,
+  read: readClose,
+});
