@@ -1,7 +1,7 @@
 // @flow
 
 import EventEmitter from 'events';
-import ObservedRemoveMap from 'observed-remove/dist/map';
+import ObservedRemoveMap from 'observed-remove/map';
 import type BraidClient from '@bunchtogether/braid-client';
 import SimplePeer from 'simple-peer';
 import PQueue from 'p-queue';

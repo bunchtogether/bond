@@ -14,6 +14,7 @@ module.exports = {
     jasmine: true
   },
   rules: {
-    'import/no-unresolved': ['error', { commonjs: true, caseSensitive: true, ignore: ['p-queue'] }],
+    "import/extensions": ["error", { "ignore": ["p-queue", "observed-remove/map"] }],
+    "import/no-unresolved": ["error", { "commonjs": true, "caseSensitive": true, "ignore": ["p-queue", "observed-remove/map"] }],
   }
 }
