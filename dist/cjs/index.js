@@ -1318,8 +1318,6 @@ var Bond = /*#__PURE__*/function (_EventEmitter) {
               error: error
             });
 
-            _this6.emit('error', error);
-
             resolve();
           };
 

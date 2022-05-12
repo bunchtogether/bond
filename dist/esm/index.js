@@ -924,7 +924,6 @@ export class Bond extends EventEmitter {
           clientId,
           error
         });
-        this.emit('error', error);
         resolve();
       };
 

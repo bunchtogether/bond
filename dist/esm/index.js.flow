@@ -822,7 +822,6 @@ export class Bond extends EventEmitter {
         this.logger.error(`Error connecting to ${userId}`);
         this.logger.errorStack(error);
         this.emit('peerError', { userId, serverId, socketId, clientId, error });
-        this.emit('error', error);
         resolve();
       };
       const handleSocketLeave = ({ socketHash: oldSocketHash }:Socket) => {
